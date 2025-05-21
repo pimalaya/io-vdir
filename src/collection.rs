@@ -1,29 +1,24 @@
-use std::path::PathBuf;
+use std::{
+    hash::{Hash, Hasher},
+    path::{Path, PathBuf},
+};
 
-/// The vdir collection.
+use uuid::Uuid;
+
+/// The Vdir collection.
 ///
-/// A vdir collection is a directory that contains only files
-/// (items). A collection may have [metadata], as defined in the
-/// vdirsyncer standard.
+/// Represents a directory that contains only files (items). A
+/// collection may have [metadata], as defined in the vdirsyncer
+/// standard.
 ///
 /// See [`crate::Item`].
 ///
 /// [metadata]: https://vdirsyncer.pimutils.org/en/stable/vdir.html#metadata
-#[derive(Clone, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Collection {
-    /// The root path of the collection.
-    ///
-    /// Corresponds to the parent's directory path of the collection.
-    pub root_path: PathBuf,
+    pub path: PathBuf,
 
     /// The name of the collection.
-    ///
-    /// Corresponds to the name of the collection's directory.
-    ///
-    /// See also [`Self::display_name`].
-    pub name: String,
-
-    /// The display name of the collection.
     ///
     /// Files called displayname contain a UTF-8 encoded label, that
     /// may be used to represent the vdir in UIs.
@@ -49,7 +44,24 @@ pub struct Collection {
 }
 
 impl Collection {
-    pub fn path(&self) -> PathBuf {
-        self.root_path.join(&self.name)
+    pub fn new(root: impl AsRef<Path>) -> Collection {
+        Collection {
+            path: root.as_ref().join(Uuid::new_v4().to_string()),
+            display_name: None,
+            description: None,
+            color: None,
+        }
+    }
+}
+
+impl Hash for Collection {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.path.hash(state);
+    }
+}
+
+impl AsRef<Path> for Collection {
+    fn as_ref(&self) -> &Path {
+        &self.path
     }
 }

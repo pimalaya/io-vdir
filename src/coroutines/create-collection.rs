@@ -1,74 +1,94 @@
 use std::collections::HashMap;
 
 use io_fs::{
-    coroutines::{CreateDir, CreateFiles},
-    Io,
+    coroutines::{
+        create_dir::{CreateDir, CreateDirError, CreateDirResult},
+        create_files::{CreateFiles, CreateFilesError, CreateFilesResult},
+    },
+    io::FsIo,
 };
+use thiserror::Error;
 
 use crate::{
+    collection::Collection,
     constants::{COLOR, DESCRIPTION, DISPLAYNAME},
-    Collection,
 };
 
+#[derive(Clone, Debug, Error)]
+pub enum CreateCollectionError {
+    #[error("Create Vdir collection error")]
+    CreateDirError(#[from] CreateDirError),
+    #[error("Create Vdir metadata error")]
+    CreateFilesError(#[from] CreateFilesError),
+}
+
+#[derive(Clone, Debug)]
+pub enum CreateCollectionResult {
+    Ok,
+    Err(CreateCollectionError),
+    Io(FsIo),
+}
+
 #[derive(Debug)]
-pub enum State {
-    CreateDir(CreateDir),
+enum State {
+    CreateCollection(CreateDir),
     CreateMetadataFiles(CreateFiles),
 }
 
 #[derive(Debug)]
 pub struct CreateCollection {
-    collection: Option<Collection>,
+    collection: Collection,
     state: State,
 }
 
 impl CreateCollection {
     pub fn new(collection: Collection) -> Self {
-        let flow = CreateDir::new(collection.path());
-        let state = State::CreateDir(flow);
+        let fs = CreateDir::new(&collection.path);
+        let state = State::CreateCollection(fs);
 
-        Self {
-            collection: Some(collection),
-            state,
-        }
+        Self { collection, state }
     }
 
-    pub fn resume(&mut self, mut io: Option<Io>) -> Result<(), Io> {
+    pub fn resume(&mut self, mut input: Option<FsIo>) -> CreateCollectionResult {
         loop {
             match &mut self.state {
-                State::CreateDir(flow) => {
-                    flow.resume(io.take())?;
-
-                    let Some(mut collection) = self.collection.take() else {
-                        return Err(Io::UnavailableInput);
+                State::CreateCollection(fs) => {
+                    match fs.resume(input.take()) {
+                        CreateDirResult::Ok => (),
+                        CreateDirResult::Err(err) => break CreateCollectionResult::Err(err.into()),
+                        CreateDirResult::Io(io) => break CreateCollectionResult::Io(io),
                     };
 
-                    let collection_path = collection.path();
+                    let display_name = self.collection.display_name.clone();
+                    let description = self.collection.description.take();
+                    let color = self.collection.color.take();
+
                     let mut contents = HashMap::new();
 
-                    if let Some(name) = collection.display_name.take() {
-                        contents.insert(collection_path.join(DISPLAYNAME), name.into_bytes());
+                    if let Some(name) = display_name {
+                        contents.insert(self.collection.path.join(DISPLAYNAME), name.into_bytes());
                     }
 
-                    if let Some(desc) = collection.description.take() {
-                        contents.insert(collection_path.join(DESCRIPTION), desc.into_bytes());
+                    if let Some(desc) = description {
+                        contents.insert(self.collection.path.join(DESCRIPTION), desc.into_bytes());
                     }
 
-                    if let Some(color) = collection.color.take() {
-                        contents.insert(collection_path.join(COLOR), color.into_bytes());
+                    if let Some(color) = color {
+                        contents.insert(self.collection.path.join(COLOR), color.into_bytes());
                     }
 
                     if contents.is_empty() {
-                        break Ok(());
+                        break CreateCollectionResult::Ok;
                     }
 
-                    let flow = CreateFiles::new(contents);
-                    self.state = State::CreateMetadataFiles(flow);
+                    let fs = CreateFiles::new(contents);
+                    self.state = State::CreateMetadataFiles(fs);
                 }
-                State::CreateMetadataFiles(flow) => {
-                    flow.resume(io.take())?;
-                    break Ok(());
-                }
+                State::CreateMetadataFiles(fs) => match fs.resume(input.take()) {
+                    CreateFilesResult::Ok => break CreateCollectionResult::Ok,
+                    CreateFilesResult::Err(err) => break CreateCollectionResult::Err(err.into()),
+                    CreateFilesResult::Io(io) => break CreateCollectionResult::Io(io),
+                },
             }
         }
     }

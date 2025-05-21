@@ -1,8 +1,8 @@
 # I/O Vdir [![Documentation](https://img.shields.io/docsrs/io-vdir)](https://docs.rs/io-vdir/latest/io_vdir) [![Matrix](https://img.shields.io/matrix/pimalaya:matrix.org?color=success&label=chat)](https://matrix.to/#/#pimalaya:matrix.org)
 
-Set of **I/O-free** Rust coroutines and runtimes to manage [Vdir](https://vdirsyncer.pimutils.org/en/stable/vdir.html) filesystems, based on [io-fs](https://github.com/pimalaya/io-fs).
+Set of **I/O-free** Rust coroutines to manage [Vdir](https://vdirsyncer.pimutils.org/en/stable/vdir.html) filesystems, based on [io-fs](https://github.com/pimalaya/io-fs).
 
-This library allows you to manage [Vdir](https://vdirsyncer.pimutils.org/en/stable/vdir.html) filesystems using an I/O-agnostic approach, based on 3 concepts:
+This library allows you to manage vCard files (.vcf) and iCal (.ics) files inside [Vdir](https://vdirsyncer.pimutils.org/en/stable/vdir.html) filesystems using an I/O-agnostic approach, based on 3 concepts:
 
 ### Coroutine
 

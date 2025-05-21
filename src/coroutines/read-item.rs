@@ -1,55 +1,109 @@
-use std::path::PathBuf;
+use std::{mem, path::PathBuf};
 
-use io_fs::{coroutines::ReadFile, Io};
+use calcard::{icalendar::ICalendar, vcard::VCard};
+use io_fs::{
+    coroutines::read_file::{ReadFile, ReadFileError, ReadFileResult},
+    io::FsIo,
+};
+use thiserror::Error;
 
-use crate::{item::ItemKind, Item};
+use crate::{
+    constants::{ICS, VCF},
+    item::{Item, ItemKind},
+};
+
+#[derive(Clone, Debug, Error)]
+pub enum ReadItemError {
+    #[error("Read Vdir item file error")]
+    ReadFile(#[from] ReadFileError),
+    #[error("Missing Vdir item file extension at {0}")]
+    MissingExt(PathBuf),
+    #[error("Invalid Vdir item file extension at {0}")]
+    InvalidExt(PathBuf),
+    #[error("Invalid Vdir item file contents at {0}")]
+    InvalidContents(PathBuf),
+    #[error("Invalid vCard contents at {1} ({0})")]
+    InvalidVcardContents(String, PathBuf),
+    #[error("Invalid iCal contents at {1} ({0})")]
+    InvalidIcalContents(String, PathBuf),
+}
+
+#[derive(Clone, Debug)]
+pub enum ReadItemResult {
+    Ok(Item),
+    Err(ReadItemError),
+    Io(FsIo),
+}
 
 #[derive(Debug)]
 pub struct ReadItem {
-    collection_path: PathBuf,
-    item_name: String,
-    item_kind: ItemKind,
-    flow: ReadFile,
+    path: PathBuf,
+    fs: ReadFile,
 }
 
 impl ReadItem {
-    pub fn new(
-        collection_path: impl Into<PathBuf>,
-        item_name: impl ToString,
-        item_kind: ItemKind,
-    ) -> Self {
-        let collection_path = collection_path.into();
-        let item_name = item_name.to_string();
-        let item_path = collection_path
-            .join(&item_name)
-            .with_extension(item_kind.as_extension());
+    pub fn new(path: impl Into<PathBuf>) -> Self {
+        let path = path.into();
+        let fs = ReadFile::new(&path);
 
-        Self {
-            collection_path,
-            item_name,
-            item_kind,
-            flow: ReadFile::new(item_path),
-        }
+        Self { path, fs }
     }
 
-    pub fn vcard(collection_path: impl Into<PathBuf>, item_name: impl ToString) -> Self {
-        Self::new(collection_path, item_name, ItemKind::Vcard)
-    }
+    pub fn resume(&mut self, input: Option<FsIo>) -> ReadItemResult {
+        let p = self.path.clone();
 
-    pub fn icalendar(collection_path: impl Into<PathBuf>, item_name: impl ToString) -> Self {
-        Self::new(collection_path, item_name, ItemKind::Icalendar)
-    }
-
-    pub fn resume(&mut self, io: Option<Io>) -> Result<Item, Io> {
-        let contents = self.flow.resume(io)?;
-
-        let item = Item {
-            collection_path: self.collection_path.clone(),
-            kind: self.item_kind.clone(),
-            name: self.item_name.clone(),
-            contents,
+        let Some(ext) = self.path.extension() else {
+            return ReadItemResult::Err(ReadItemError::MissingExt(p));
         };
 
-        Ok(item)
+        let contents = match self.fs.resume(input) {
+            ReadFileResult::Ok(paths) => paths,
+            ReadFileResult::Err(err) => return ReadItemResult::Err(err.into()),
+            ReadFileResult::Io(io) => return ReadItemResult::Io(io),
+        };
+
+        let Ok(contents) = String::from_utf8(contents) else {
+            return ReadItemResult::Err(ReadItemError::InvalidContents(p));
+        };
+
+        if ext == VCF {
+            let vcard = match VCard::parse(contents) {
+                Ok(vcard) => vcard,
+                Err(err) => {
+                    // NOTE: err is not a regular error
+                    // TODO: make better mapping
+                    let err = ReadItemError::InvalidVcardContents(format!("{err:?}"), p);
+                    return ReadItemResult::Err(err);
+                }
+            };
+
+            let item = Item {
+                path: mem::take(&mut self.path),
+                kind: ItemKind::Vcard(vcard),
+            };
+
+            return ReadItemResult::Ok(item);
+        }
+
+        if ext == ICS {
+            let ical = match ICalendar::parse(contents) {
+                Ok(ical) => ical,
+                Err(err) => {
+                    // NOTE: err is not a regular error
+                    // TODO: make better mapping
+                    let err = ReadItemError::InvalidIcalContents(format!("{err:?}"), p);
+                    return ReadItemResult::Err(err);
+                }
+            };
+
+            let item = Item {
+                path: mem::take(&mut self.path),
+                kind: ItemKind::Ical(ical),
+            };
+
+            return ReadItemResult::Ok(item);
+        }
+
+        ReadItemResult::Err(ReadItemError::InvalidExt(p))
     }
 }

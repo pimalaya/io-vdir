@@ -1,52 +1,72 @@
-use std::path::PathBuf;
+use std::{
+    hash::{Hash, Hasher},
+    path::{Path, PathBuf},
+};
 
-use crate::constants::{ICS, VCF};
+use calcard::{icalendar::ICalendar, vcard::VCard};
+use uuid::Uuid;
 
-/// The vdir collection's item.
+use crate::{
+    collection::Collection,
+    constants::{ICS, VCF},
+};
+
+/// The Vdir collection's item.
 ///
-/// A vdir collection's item is either a vCard (.vcf) or a iCalendar
-/// file (.ics).
+/// Represents either a vCard (.vcf) or a iCalendar file (.ics).
 ///
 /// See [`crate::Collection`].
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Item {
-    pub collection_path: PathBuf,
+    pub path: PathBuf,
+
+    /// The item kind.
     pub kind: ItemKind,
-    pub name: String,
-    pub contents: Vec<u8>,
 }
 
 impl Item {
-    pub fn name(&self) -> &str {
-        &self.name
-    }
+    pub fn new(collection: &Collection, kind: ItemKind) -> Item {
+        let path = collection
+            .path
+            .join(Uuid::new_v4().to_string())
+            .with_extension(kind.extension());
 
-    pub fn contents(&self) -> &[u8] {
-        &self.contents
-    }
-
-    pub fn path(&self) -> PathBuf {
-        self.collection_path
-            .join(&self.name)
-            .with_extension(self.kind.as_extension())
-    }
-
-    pub fn extension(&self) -> &'static str {
-        self.kind.as_extension()
+        Item { path, kind }
     }
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+impl Hash for Item {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.path.hash(state);
+    }
+}
+
+impl AsRef<Path> for Item {
+    fn as_ref(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl ToString for Item {
+    fn to_string(&self) -> String {
+        match &self.kind {
+            ItemKind::Ical(ical) => ical.to_string(),
+            ItemKind::Vcard(vcard) => vcard.to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ItemKind {
-    Vcard,
-    Icalendar,
+    Ical(ICalendar),
+    Vcard(VCard),
 }
 
 impl ItemKind {
-    pub fn as_extension(&self) -> &'static str {
+    pub fn extension(&self) -> &'static str {
         match self {
-            Self::Vcard => VCF,
-            Self::Icalendar => ICS,
+            Self::Ical(_) => ICS,
+            Self::Vcard(_) => VCF,
         }
     }
 }

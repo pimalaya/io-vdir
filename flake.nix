@@ -1,5 +1,5 @@
 {
-  description = "Set of I/O-free Rust coroutines and runtimes to manage Vdir filesystems";
+  description = "Set of I/O-free Rust coroutines to manage Vdir filesystems";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixpkgs-unstable";

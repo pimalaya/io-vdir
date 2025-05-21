@@ -8,13 +8,7 @@
 //!
 //! [VDIR flows]: vdirs://github.com/pimalaya/vdir
 
-mod collection;
+pub mod collection;
 pub mod constants;
 pub mod coroutines;
-mod item;
-
-#[doc(inline)]
-pub use self::{
-    collection::Collection,
-    item::{Item, ItemKind},
-};
+pub mod item;

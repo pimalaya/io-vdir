@@ -1,48 +1,38 @@
-use std::path::Path;
+use io_fs::{
+    coroutines::create_file::{CreateFile, CreateFileError, CreateFileResult},
+    io::FsIo,
+};
+use thiserror::Error;
 
-use io_fs::{coroutines::CreateFile, Io};
+use crate::item::Item;
 
-use crate::ItemKind;
-
-#[derive(Debug)]
-pub struct CreateItem {
-    flow: CreateFile,
+#[derive(Clone, Debug, Error)]
+pub enum CreateItemError {
+    #[error("Create Vdir item error")]
+    CreateFileError(#[from] CreateFileError),
 }
 
+#[derive(Clone, Debug)]
+pub enum CreateItemResult {
+    Ok,
+    Err(CreateItemError),
+    Io(FsIo),
+}
+
+#[derive(Debug)]
+pub struct CreateItem(CreateFile);
+
 impl CreateItem {
-    pub fn new(
-        collection_path: impl AsRef<Path>,
-        kind: ItemKind,
-        name: impl AsRef<str>,
-        contents: impl IntoIterator<Item = u8>,
-    ) -> Self {
-        let path = collection_path
-            .as_ref()
-            .join(name.as_ref())
-            .with_extension(kind.as_extension());
+    pub fn new(item: Item) -> Self {
+        let bytes = item.to_string().into_bytes();
+        Self(CreateFile::new(item.path, bytes))
+    }
 
-        Self {
-            flow: CreateFile::new(path, contents),
+    pub fn resume(&mut self, input: Option<FsIo>) -> CreateItemResult {
+        match self.0.resume(input) {
+            CreateFileResult::Ok => CreateItemResult::Ok,
+            CreateFileResult::Err(err) => CreateItemResult::Err(err.into()),
+            CreateFileResult::Io(io) => CreateItemResult::Io(io),
         }
-    }
-
-    pub fn vcard(
-        collection_path: impl AsRef<Path>,
-        name: impl AsRef<str>,
-        contents: impl IntoIterator<Item = u8>,
-    ) -> Self {
-        Self::new(collection_path, ItemKind::Vcard, name, contents)
-    }
-
-    pub fn icalendar(
-        collection_path: impl AsRef<Path>,
-        name: impl AsRef<str>,
-        contents: impl IntoIterator<Item = u8>,
-    ) -> Self {
-        Self::new(collection_path, ItemKind::Icalendar, name, contents)
-    }
-
-    pub fn resume(&mut self, io: Option<Io>) -> Result<(), Io> {
-        self.flow.resume(io)
     }
 }

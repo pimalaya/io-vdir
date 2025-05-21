@@ -1,12 +1,12 @@
 [package]
 name = "io-vdir"
-description = "Set of I/O-free coroutines and runtimes to manage Vdir filesystems"
-version = "1.0.0"
+description = "Set of I/O-free coroutines to manage Vdir filesystems"
+version = "0.0.1"
 authors = ["soywod <clement.douin@posteo.net>"]
 edition = "2021"
 license = "MIT"
 categories = ["api-bindings", "filesystem"]
-keywords = ["io-free", "coroutine", "runtime", "vdir", "directory"]
+keywords = ["io-free", "coroutine", "vdir", "vcard", "ical"]
 homepage = "https://pimalaya.org"
 documentation = "https://docs.rs/io-vdir/latest/io_vdir"
 repository = "https://github.com/pimalaya/io-vdir"
@@ -17,13 +17,17 @@ rustdoc-args = ["--cfg", "docsrs"]
 
 [dev-dependencies]
 env_logger = "0.11"
-io-fs = { version = "1", default-features = false, features = ["std"] }
+io-fs = { version = "0.0.1", default-features = false, features = ["std"] }
 tempdir = "0.3"
 
 [dependencies]
-io-fs = { version = "1", default-features = false }
+calcard = "0.1"
+io-fs = { version = "0.0.1", default-features = false }
 log = "0.4"
 memchr = "2.7"
+thiserror = "2"
+uuid = { version = "1", features = ["v4"] }
 
 [patch.crates-io]
-io-fs.git = "https://github.com/pimalaya/io-fs"
+# io-fs.git = "https://github.com/pimalaya/io-fs"
+io-fs.path = "../fs"

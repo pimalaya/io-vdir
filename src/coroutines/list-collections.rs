@@ -1,55 +1,67 @@
-use std::{collections::HashSet, path::PathBuf};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+};
 
 use io_fs::{
-    coroutines::{ReadDir, ReadFiles},
-    Io,
+    coroutines::{
+        read_dir::{ReadDir, ReadDirError, ReadDirResult},
+        read_files::{ReadFiles, ReadFilesError, ReadFilesResult},
+    },
+    io::FsIo,
 };
+use thiserror::Error;
 
 use crate::{
+    collection::Collection,
     constants::{COLOR, DESCRIPTION, DISPLAYNAME},
-    Collection,
 };
+
+#[derive(Clone, Debug, Error)]
+pub enum ListCollectionsError {
+    #[error("List Vdir collections error")]
+    ListDirsError(#[from] ReadDirError),
+    #[error("Read Vdir collections' metadata error")]
+    ListFilesError(#[from] ReadFilesError),
+}
+
+#[derive(Clone, Debug)]
+pub enum ListCollectionsResult {
+    Ok(HashSet<Collection>),
+    Err(ListCollectionsError),
+    Io(FsIo),
+}
 
 #[derive(Debug)]
 pub enum State {
-    ReadDirs(ReadDir),
+    ListCollections(ReadDir),
     ReadMetadataFiles(HashSet<PathBuf>, ReadFiles),
 }
 
 #[derive(Debug)]
 pub struct ListCollections {
-    root_path: PathBuf,
     state: State,
 }
 
 impl ListCollections {
-    pub fn new(root_path: impl Into<PathBuf>) -> Self {
-        let root_path = root_path.into();
-        let flow = ReadDir::new(&root_path);
-        let state = State::ReadDirs(flow);
+    pub fn new(root: impl AsRef<Path>) -> Self {
+        let fs = ReadDir::new(root.as_ref());
+        let state = State::ListCollections(fs);
 
-        Self { root_path, state }
+        Self { state }
     }
 
-    pub fn resume(&mut self, mut io: Option<Io>) -> Result<HashSet<Collection>, Io> {
+    pub fn resume(&mut self, mut input: Option<FsIo>) -> ListCollectionsResult {
         loop {
             match &mut self.state {
-                State::ReadDirs(flow) => {
-                    let mut collection_paths = flow.resume(io.take())?;
+                State::ListCollections(fs) => {
+                    let mut collection_paths = match fs.resume(input.take()) {
+                        ReadDirResult::Ok(paths) => paths,
+                        ReadDirResult::Err(err) => break ListCollectionsResult::Err(err.into()),
+                        ReadDirResult::Io(io) => break ListCollectionsResult::Io(io),
+                    };
 
-                    collection_paths.retain(|path| {
-                        let Some(name) = path.file_name() else {
-                            return false;
-                        };
-
-                        let path = self.root_path.join(&name);
-
-                        if !path.is_dir() {
-                            return false;
-                        }
-
-                        true
-                    });
+                    collection_paths.retain(|path| path.is_dir());
 
                     let mut metadata_paths = HashSet::new();
 
@@ -76,22 +88,22 @@ impl ListCollections {
                     let flow = ReadFiles::new(metadata_paths);
                     self.state = State::ReadMetadataFiles(collection_paths, flow);
                 }
-                State::ReadMetadataFiles(collection_paths, flow) => {
-                    let mut metadata = flow.resume(io.take())?;
+                State::ReadMetadataFiles(collection_paths, fs) => {
+                    let mut metadata = match fs.resume(input.take()) {
+                        ReadFilesResult::Ok(meta) => meta,
+                        ReadFilesResult::Err(err) => break ListCollectionsResult::Err(err.into()),
+                        ReadFilesResult::Io(io) => break ListCollectionsResult::Io(io),
+                    };
+
                     let mut collections = HashSet::new();
 
                     for path in collection_paths.clone() {
-                        let Some(name) = path.file_name() else {
-                            continue;
-                        };
-
                         let display_name = path.join(DISPLAYNAME);
                         let description = path.join(DESCRIPTION);
                         let color = path.join(COLOR);
 
                         let mut collection = Collection {
-                            root_path: self.root_path.clone(),
-                            name: name.to_string_lossy().to_string(),
+                            path,
                             display_name: None,
                             description: None,
                             color: None,
@@ -130,7 +142,7 @@ impl ListCollections {
                         collections.insert(collection);
                     }
 
-                    break Ok(collections);
+                    break ListCollectionsResult::Ok(collections);
                 }
             }
         }
