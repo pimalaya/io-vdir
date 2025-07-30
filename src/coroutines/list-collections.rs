@@ -1,13 +1,13 @@
+//! I/O-free coroutine to list Vdir collections.
+
 use std::{
     collections::HashSet,
     path::{Path, PathBuf},
 };
 
 use io_fs::{
-    coroutines::{
-        read_dir::{ReadDir, ReadDirError, ReadDirResult},
-        read_files::{ReadFiles, ReadFilesError, ReadFilesResult},
-    },
+    coroutines::{read_dir::ReadDir, read_files::ReadFiles},
+    error::{FsError, FsResult},
     io::FsIo,
 };
 use thiserror::Error;
@@ -17,33 +17,46 @@ use crate::{
     constants::{COLOR, DESCRIPTION, DISPLAYNAME},
 };
 
+/// Errors that can occur during the coroutine progression.
 #[derive(Clone, Debug, Error)]
 pub enum ListCollectionsError {
+    /// An error occured during the directory listing.
     #[error("List Vdir collections error")]
-    ListDirsError(#[from] ReadDirError),
+    ListDirsError(#[source] FsError),
+
+    /// An error occured during the metadata file listing.
     #[error("Read Vdir collections' metadata error")]
-    ListFilesError(#[from] ReadFilesError),
+    ListFilesError(#[source] FsError),
 }
 
+/// Output emitted when the coroutine terminates its progression.
 #[derive(Clone, Debug)]
 pub enum ListCollectionsResult {
+    /// The coroutine successfully terminated its progression.
     Ok(HashSet<Collection>),
+
+    /// The coroutine encountered an error.
     Err(ListCollectionsError),
+
+    /// An I/O needs to be processed in order to make the coroutine
+    /// progress further.
     Io(FsIo),
 }
 
 #[derive(Debug)]
-pub enum State {
+enum State {
     ListCollections(ReadDir),
     ReadMetadataFiles(HashSet<PathBuf>, ReadFiles),
 }
 
+/// I/O-free coroutine to list Vdir collections.
 #[derive(Debug)]
 pub struct ListCollections {
     state: State,
 }
 
 impl ListCollections {
+    /// Creates a new coroutine from the given root path.
     pub fn new(root: impl AsRef<Path>) -> Self {
         let fs = ReadDir::new(root.as_ref());
         let state = State::ListCollections(fs);
@@ -51,14 +64,18 @@ impl ListCollections {
         Self { state }
     }
 
-    pub fn resume(&mut self, mut input: Option<FsIo>) -> ListCollectionsResult {
+    /// Makes the coroutine progress.
+    pub fn resume(&mut self, mut arg: Option<FsIo>) -> ListCollectionsResult {
         loop {
             match &mut self.state {
                 State::ListCollections(fs) => {
-                    let mut collection_paths = match fs.resume(input.take()) {
-                        ReadDirResult::Ok(paths) => paths,
-                        ReadDirResult::Err(err) => break ListCollectionsResult::Err(err.into()),
-                        ReadDirResult::Io(io) => break ListCollectionsResult::Io(io),
+                    let mut collection_paths = match fs.resume(arg.take()) {
+                        FsResult::Ok(paths) => paths,
+                        FsResult::Io(io) => break ListCollectionsResult::Io(io),
+                        FsResult::Err(err) => {
+                            let err = ListCollectionsError::ListDirsError(err);
+                            break ListCollectionsResult::Err(err);
+                        }
                     };
 
                     collection_paths.retain(|path| path.is_dir());
@@ -89,10 +106,13 @@ impl ListCollections {
                     self.state = State::ReadMetadataFiles(collection_paths, flow);
                 }
                 State::ReadMetadataFiles(collection_paths, fs) => {
-                    let mut metadata = match fs.resume(input.take()) {
-                        ReadFilesResult::Ok(meta) => meta,
-                        ReadFilesResult::Err(err) => break ListCollectionsResult::Err(err.into()),
-                        ReadFilesResult::Io(io) => break ListCollectionsResult::Io(io),
+                    let mut metadata = match fs.resume(arg.take()) {
+                        FsResult::Ok(meta) => meta,
+                        FsResult::Io(io) => break ListCollectionsResult::Io(io),
+                        FsResult::Err(err) => {
+                            let err = ListCollectionsError::ListFilesError(err);
+                            break ListCollectionsResult::Err(err);
+                        }
                     };
 
                     let mut collections = HashSet::new();

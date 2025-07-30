@@ -1,8 +1,11 @@
+//! I/O-free coroutine to read a Vdir item.
+
 use std::{mem, path::PathBuf};
 
 use calcard::{icalendar::ICalendar, vcard::VCard};
 use io_fs::{
-    coroutines::read_file::{ReadFile, ReadFileError, ReadFileResult},
+    coroutines::read_file::ReadFile,
+    error::{FsError, FsResult},
     io::FsIo,
 };
 use thiserror::Error;
@@ -12,29 +15,49 @@ use crate::{
     item::{Item, ItemKind},
 };
 
+/// Errors that can occur during the coroutine progression.
 #[derive(Clone, Debug, Error)]
 pub enum ReadItemError {
+    /// An error occured during the file item reading.
     #[error("Read Vdir item file error")]
-    ReadFile(#[from] ReadFileError),
+    ReadFile(#[from] FsError),
+
+    /// The Vdir item does not have a file extension.
     #[error("Missing Vdir item file extension at {0}")]
     MissingExt(PathBuf),
+
+    /// The Vdir item has an invalid file extension.
     #[error("Invalid Vdir item file extension at {0}")]
     InvalidExt(PathBuf),
+
+    /// The Vdir item has an invalid file contents.
     #[error("Invalid Vdir item file contents at {0}")]
     InvalidContents(PathBuf),
+
+    /// The Vdir item has an invalid vCard contents.
     #[error("Invalid vCard contents at {1} ({0})")]
     InvalidVcardContents(String, PathBuf),
+
+    /// The Vdir item has an invalid iCalendar contents.
     #[error("Invalid iCal contents at {1} ({0})")]
     InvalidIcalContents(String, PathBuf),
 }
 
+/// Output emitted when the coroutine terminates its progression.
 #[derive(Clone, Debug)]
 pub enum ReadItemResult {
+    /// The coroutine successfully terminated its progression.
     Ok(Item),
+
+    /// The coroutine encountered an error.
     Err(ReadItemError),
+
+    /// An I/O needs to be processed in order to make the coroutine
+    /// progress further.
     Io(FsIo),
 }
 
+/// I/O-free coroutine to read a Vdir item.
 #[derive(Debug)]
 pub struct ReadItem {
     path: PathBuf,
@@ -42,6 +65,7 @@ pub struct ReadItem {
 }
 
 impl ReadItem {
+    /// Creates a new coroutine from the given item path.
     pub fn new(path: impl Into<PathBuf>) -> Self {
         let path = path.into();
         let fs = ReadFile::new(&path);
@@ -49,17 +73,18 @@ impl ReadItem {
         Self { path, fs }
     }
 
-    pub fn resume(&mut self, input: Option<FsIo>) -> ReadItemResult {
+    /// Makes the coroutine progress.
+    pub fn resume(&mut self, arg: Option<FsIo>) -> ReadItemResult {
         let p = self.path.clone();
 
         let Some(ext) = self.path.extension() else {
             return ReadItemResult::Err(ReadItemError::MissingExt(p));
         };
 
-        let contents = match self.fs.resume(input) {
-            ReadFileResult::Ok(paths) => paths,
-            ReadFileResult::Err(err) => return ReadItemResult::Err(err.into()),
-            ReadFileResult::Io(io) => return ReadItemResult::Io(io),
+        let contents = match self.fs.resume(arg) {
+            FsResult::Ok(paths) => paths,
+            FsResult::Err(err) => return ReadItemResult::Err(err.into()),
+            FsResult::Io(io) => return ReadItemResult::Io(io),
         };
 
         let Ok(contents) = String::from_utf8(contents) else {

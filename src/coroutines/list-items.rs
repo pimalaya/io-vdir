@@ -1,11 +1,11 @@
+//! I/O-free coroutine to list items in a Vdir collection.
+
 use std::{collections::HashSet, path::Path};
 
 use calcard::{icalendar::ICalendar, vcard::VCard};
 use io_fs::{
-    coroutines::{
-        read_dir::{ReadDir, ReadDirError, ReadDirResult},
-        read_files::{ReadFiles, ReadFilesError, ReadFilesResult},
-    },
+    coroutines::{read_dir::ReadDir, read_files::ReadFiles},
+    error::{FsError, FsResult},
     io::FsIo,
 };
 use thiserror::Error;
@@ -16,18 +16,29 @@ use crate::{
     item::ItemKind,
 };
 
+/// Errors that can occur during the coroutine progression.
 #[derive(Clone, Debug, Error)]
 pub enum ListItemsError {
+    /// An error occured during the directory listing.
     #[error("List Vdir items error")]
-    ListDirsError(#[from] ReadDirError),
+    ListDirsError(#[source] FsError),
+
+    /// An error occured during the metadata files listing.
     #[error("Read Vdir items' metadata error")]
-    ListFilesError(#[from] ReadFilesError),
+    ListFilesError(#[source] FsError),
 }
 
+/// Output emitted when the coroutine terminates its progression.
 #[derive(Clone, Debug)]
 pub enum ListItemsResult {
+    /// The coroutine successfully terminated its progression.
     Ok(HashSet<Item>),
+
+    /// The coroutine encountered an error.
     Err(ListItemsError),
+
+    /// An I/O needs to be processed in order to make the coroutine
+    /// progress further.
     Io(FsIo),
 }
 
@@ -37,12 +48,14 @@ enum State {
     ReadItems(ReadFiles),
 }
 
+/// I/O-free coroutine to list items in a Vdir collection.
 #[derive(Debug)]
 pub struct ListItems {
     state: State,
 }
 
 impl ListItems {
+    /// Creates a new coroutine from the given addressbook path.
     pub fn new(path: impl AsRef<Path>) -> Self {
         let fs = ReadDir::new(path.as_ref());
         let state = State::ListItems(fs);
@@ -50,14 +63,18 @@ impl ListItems {
         Self { state }
     }
 
-    pub fn resume(&mut self, mut input: Option<FsIo>) -> ListItemsResult {
+    /// Makes the coroutine progress.
+    pub fn resume(&mut self, mut arg: Option<FsIo>) -> ListItemsResult {
         loop {
             match &mut self.state {
                 State::ListItems(fs) => {
-                    let mut item_paths = match fs.resume(input.take()) {
-                        ReadDirResult::Ok(paths) => paths,
-                        ReadDirResult::Err(err) => break ListItemsResult::Err(err.into()),
-                        ReadDirResult::Io(io) => break ListItemsResult::Io(io),
+                    let mut item_paths = match fs.resume(arg.take()) {
+                        FsResult::Ok(paths) => paths,
+                        FsResult::Io(io) => break ListItemsResult::Io(io),
+                        FsResult::Err(err) => {
+                            let err = ListItemsError::ListDirsError(err);
+                            break ListItemsResult::Err(err);
+                        }
                     };
 
                     item_paths.retain(|path| {
@@ -80,10 +97,13 @@ impl ListItems {
                     self.state = State::ReadItems(fs);
                 }
                 State::ReadItems(fs) => {
-                    let contents = match fs.resume(input.take()) {
-                        ReadFilesResult::Ok(contents) => contents,
-                        ReadFilesResult::Err(err) => break ListItemsResult::Err(err.into()),
-                        ReadFilesResult::Io(io) => break ListItemsResult::Io(io),
+                    let contents = match fs.resume(arg.take()) {
+                        FsResult::Ok(contents) => contents,
+                        FsResult::Io(io) => break ListItemsResult::Io(io),
+                        FsResult::Err(err) => {
+                            let err = ListItemsError::ListFilesError(err);
+                            break ListItemsResult::Err(err);
+                        }
                     };
 
                     let mut items = HashSet::new();

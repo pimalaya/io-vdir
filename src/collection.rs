@@ -1,3 +1,5 @@
+//! Module dedicated to the Vdir collection.
+
 use std::{
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
@@ -11,11 +13,12 @@ use uuid::Uuid;
 /// collection may have [metadata], as defined in the vdirsyncer
 /// standard.
 ///
-/// See [`crate::Item`].
+/// See [`crate::item::Item`].
 ///
 /// [metadata]: https://vdirsyncer.pimutils.org/en/stable/vdir.html#metadata
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Collection {
+    /// The directory path of the Vdir collection.
     pub path: PathBuf,
 
     /// The name of the collection.
@@ -44,6 +47,10 @@ pub struct Collection {
 }
 
 impl Collection {
+    /// Creates a new collection for the given root directory path.
+    ///
+    /// This does not create the filesystem directory, it just creates
+    /// an empty collection with an auto-generated UUID.
     pub fn new(root: impl AsRef<Path>) -> Collection {
         Collection {
             path: root.as_ref().join(Uuid::new_v4().to_string()),

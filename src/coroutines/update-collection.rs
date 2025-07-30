@@ -1,10 +1,10 @@
+//! I/O-free coroutine to update a Vdir collection.
+
 use std::{collections::HashMap, path::PathBuf};
 
 use io_fs::{
-    coroutines::{
-        create_files::{CreateFiles, CreateFilesError, CreateFilesResult},
-        rename::{Rename, RenameError, RenameResult},
-    },
+    coroutines::{create_files::CreateFiles, rename::Rename},
+    error::{FsError, FsResult},
     io::FsIo,
 };
 use thiserror::Error;
@@ -14,18 +14,30 @@ use crate::{
     constants::{COLOR, DESCRIPTION, DISPLAYNAME, TMP},
 };
 
+/// Errors that can occur during the coroutine progression.
 #[derive(Clone, Debug, Error)]
 pub enum UpdateCollectionError {
+    /// An error occured during the creation of new metadata files.
     #[error("Create new Vdir collection metadata")]
-    CreateNewMetadata(#[from] CreateFilesError),
+    CreateNewMetadata(#[source] FsError),
+
+    /// An error occured during the switch between old and new
+    /// metadata files.
     #[error("Save Vdir collection metadata")]
-    SaveMetadata(#[from] RenameError),
+    SaveMetadata(#[source] FsError),
 }
 
+/// Output emitted when the coroutine terminates its progression.
 #[derive(Clone, Debug)]
 pub enum UpdateCollectionResult {
+    /// The coroutine successfully terminated its progression.
     Ok,
+
+    /// The coroutine encountered an error.
     Err(UpdateCollectionError),
+
+    /// An I/O needs to be processed in order to make the coroutine
+    /// progress further.
     Io(FsIo),
 }
 
@@ -35,12 +47,14 @@ enum State {
     MoveMetadataFiles(Rename),
 }
 
+/// I/O-free coroutine to update a Vdir collection.
 #[derive(Debug)]
 pub struct UpdateCollection {
     state: State,
 }
 
 impl UpdateCollection {
+    /// Creates a new coroutine from the given collection.
     pub fn new(mut collection: Collection) -> Self {
         let mut contents = HashMap::new();
         let mut rename_paths = Vec::new();
@@ -72,26 +86,31 @@ impl UpdateCollection {
         Self { state }
     }
 
-    pub fn resume(&mut self, mut input: Option<FsIo>) -> UpdateCollectionResult {
+    /// Makes the coroutine progress.
+    pub fn resume(&mut self, mut arg: Option<FsIo>) -> UpdateCollectionResult {
         loop {
             match &mut self.state {
                 State::CreateMetadataTempFiles(fs, rename_paths) => {
-                    match fs.resume(input.take()) {
-                        CreateFilesResult::Ok => (),
-                        CreateFilesResult::Err(err) => {
-                            break UpdateCollectionResult::Err(err.into())
+                    match fs.resume(arg.take()) {
+                        FsResult::Ok(()) => (),
+                        FsResult::Io(io) => break UpdateCollectionResult::Io(io),
+                        FsResult::Err(err) => {
+                            let err = UpdateCollectionError::CreateNewMetadata(err);
+                            break UpdateCollectionResult::Err(err);
                         }
-                        CreateFilesResult::Io(io) => break UpdateCollectionResult::Io(io),
                     };
 
                     let fs = Rename::new(rename_paths.drain(..));
                     self.state = State::MoveMetadataFiles(fs);
                 }
                 State::MoveMetadataFiles(fs) => {
-                    match fs.resume(input.take()) {
-                        RenameResult::Ok => (),
-                        RenameResult::Err(err) => break UpdateCollectionResult::Err(err.into()),
-                        RenameResult::Io(io) => break UpdateCollectionResult::Io(io),
+                    match fs.resume(arg.take()) {
+                        FsResult::Ok(()) => (),
+                        FsResult::Io(io) => break UpdateCollectionResult::Io(io),
+                        FsResult::Err(err) => {
+                            let err = UpdateCollectionError::SaveMetadata(err);
+                            break UpdateCollectionResult::Err(err);
+                        }
                     };
 
                     break UpdateCollectionResult::Ok;

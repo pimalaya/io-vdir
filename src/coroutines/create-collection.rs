@@ -1,10 +1,10 @@
+//! I/O-free coroutine to create a Vdir collection.
+
 use std::collections::HashMap;
 
 use io_fs::{
-    coroutines::{
-        create_dir::{CreateDir, CreateDirError, CreateDirResult},
-        create_files::{CreateFiles, CreateFilesError, CreateFilesResult},
-    },
+    coroutines::{create_dir::CreateDir, create_files::CreateFiles},
+    error::{FsError, FsResult},
     io::FsIo,
 };
 use thiserror::Error;
@@ -14,18 +14,29 @@ use crate::{
     constants::{COLOR, DESCRIPTION, DISPLAYNAME},
 };
 
+/// Errors that can occur during the coroutine progression.
 #[derive(Clone, Debug, Error)]
 pub enum CreateCollectionError {
+    /// An error occured during the directory creation.
     #[error("Create Vdir collection error")]
-    CreateDirError(#[from] CreateDirError),
+    CreateDirError(#[source] FsError),
+
+    /// An error occured during the metadata files creation.
     #[error("Create Vdir metadata error")]
-    CreateFilesError(#[from] CreateFilesError),
+    CreateFilesError(#[source] FsError),
 }
 
+/// Output emitted when the coroutine terminates its progression.
 #[derive(Clone, Debug)]
 pub enum CreateCollectionResult {
+    /// The coroutine successfully terminated its progression.
     Ok,
+
+    /// The coroutine encountered an error.
     Err(CreateCollectionError),
+
+    /// An I/O needs to be processed in order to make the coroutine
+    /// progress further.
     Io(FsIo),
 }
 
@@ -35,6 +46,7 @@ enum State {
     CreateMetadataFiles(CreateFiles),
 }
 
+/// I/O-free coroutine to create a Vdir collection.
 #[derive(Debug)]
 pub struct CreateCollection {
     collection: Collection,
@@ -42,6 +54,7 @@ pub struct CreateCollection {
 }
 
 impl CreateCollection {
+    /// Creates a new coroutine from the given collection.
     pub fn new(collection: Collection) -> Self {
         let fs = CreateDir::new(&collection.path);
         let state = State::CreateCollection(fs);
@@ -49,14 +62,18 @@ impl CreateCollection {
         Self { collection, state }
     }
 
-    pub fn resume(&mut self, mut input: Option<FsIo>) -> CreateCollectionResult {
+    /// Makes the coroutine progress.
+    pub fn resume(&mut self, mut arg: Option<FsIo>) -> CreateCollectionResult {
         loop {
             match &mut self.state {
                 State::CreateCollection(fs) => {
-                    match fs.resume(input.take()) {
-                        CreateDirResult::Ok => (),
-                        CreateDirResult::Err(err) => break CreateCollectionResult::Err(err.into()),
-                        CreateDirResult::Io(io) => break CreateCollectionResult::Io(io),
+                    match fs.resume(arg.take()) {
+                        FsResult::Ok(()) => (),
+                        FsResult::Io(io) => break CreateCollectionResult::Io(io),
+                        FsResult::Err(err) => {
+                            let err = CreateCollectionError::CreateDirError(err);
+                            break CreateCollectionResult::Err(err);
+                        }
                     };
 
                     let display_name = self.collection.display_name.clone();
@@ -84,11 +101,16 @@ impl CreateCollection {
                     let fs = CreateFiles::new(contents);
                     self.state = State::CreateMetadataFiles(fs);
                 }
-                State::CreateMetadataFiles(fs) => match fs.resume(input.take()) {
-                    CreateFilesResult::Ok => break CreateCollectionResult::Ok,
-                    CreateFilesResult::Err(err) => break CreateCollectionResult::Err(err.into()),
-                    CreateFilesResult::Io(io) => break CreateCollectionResult::Io(io),
-                },
+                State::CreateMetadataFiles(fs) => {
+                    break match fs.resume(arg.take()) {
+                        FsResult::Ok(()) => CreateCollectionResult::Ok,
+                        FsResult::Io(io) => CreateCollectionResult::Io(io),
+                        FsResult::Err(err) => {
+                            let err = CreateCollectionError::CreateFilesError(err);
+                            CreateCollectionResult::Err(err)
+                        }
+                    }
+                }
             }
         }
     }

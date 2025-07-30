@@ -1,3 +1,12 @@
+//! Collection of I/O-free, resumable and composable Vdir state
+//! machines.
+//!
+//! Coroutines emit [I/O] requests that need to be processed by
+//! [runtimes] in order to continue their progression.
+//!
+//! [I/O]: crate::io
+//! [runtimes]: crate::runtimes
+
 #[path = "create-collection.rs"]
 pub mod create_collection;
 #[path = "create-item.rs"]
