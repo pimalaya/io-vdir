@@ -16,11 +16,11 @@ use io_vdir::{
     },
     item::{Item, ItemKind},
 };
-use tempdir::TempDir;
+use tempfile::tempdir;
 
 #[test]
 fn std() {
-    let workdir = TempDir::new("test-vdir-std").unwrap();
+    let workdir = tempdir().unwrap();
     let root = workdir.path();
 
     // should list empty collections
@@ -255,6 +255,4 @@ fn std() {
     };
 
     assert!(collections.is_empty());
-
-    workdir.close().unwrap();
 }

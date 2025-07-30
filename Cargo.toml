@@ -4,7 +4,7 @@ description = "Set of I/O-free coroutines to manage Vdir filesystems"
 version = "0.0.1"
 authors = ["soywod <clement.douin@posteo.net>"]
 edition = "2021"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 categories = ["api-bindings", "filesystem"]
 keywords = ["io-free", "coroutine", "vdir", "vcard", "ical"]
 homepage = "https://pimalaya.org"
@@ -18,7 +18,7 @@ rustdoc-args = ["--cfg", "docsrs"]
 [dev-dependencies]
 env_logger = "0.11"
 io-fs = { version = "0.0.1", default-features = false, features = ["std"] }
-tempdir = "0.3"
+tempfile = "3.20"
 
 [dependencies]
 calcard = "0.1"
@@ -27,7 +27,3 @@ log = "0.4"
 memchr = "2.7"
 thiserror = "2"
 uuid = { version = "1", features = ["v4"] }
-
-[patch.crates-io]
-# io-fs.git = "https://github.com/pimalaya/io-fs"
-io-fs.path = "../fs"
