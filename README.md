@@ -8,7 +8,7 @@ This library allows you to manage vCard files (.vcf) and iCal (.ics) files insid
 
 A coroutine is an *I/O-free*, *resumable* and *composable* state machine that **emits I/O requests**. A coroutine is considered *terminated* when it does not emit I/O requests anymore.
 
-*See available coroutines at [./src/coroutines](https://github.com/pimalaya/io-vdir/tree/master/src).*
+*See available coroutines at [./src/coroutines](https://github.com/pimalaya/io-vdir/tree/master/src/coroutines).*
 
 ### Runtime
 
@@ -22,19 +22,49 @@ The loop is the glue between coroutines and runtimes. It makes the coroutine pro
 
 ## Examples
 
-*See complete examples at [./examples](https://github.com/pimalaya/io-vdir/blob/master/examples).*
-
-### TODO
+### List collections synchronously
 
 ```rust,ignore
-// TODO
+use std::{path::PathBuf};
+
+use io_fs::runtimes::std::handle;
+use io_vdir::coroutines::list_collections::{ListCollections, ListCollectionsResult};
+
+let mut arg = None;
+let mut coroutine = ListCollections::new("/path/to/collections");
+
+let collections = loop {
+    match coroutine.resume(arg) {
+        ListCollectionsResult::Ok(collections) => break collections,
+        ListCollectionsResult::Err(err) => panic!("{err}"),
+        ListCollectionsResult::Io(io) => arg = Some(handle(io).unwrap()),
+    }
+};
+
+println!("Collection paths:");
+
+for collection in collections {
+    println!(" - {}", collection.path.display());
+}
 ```
 
-### More examples
+*See complete examples at [./examples](https://github.com/pimalaya/io-vdir/blob/master/examples).*
+
+## More examples
 
 Have a look at projects built on the top of this library:
 
-- *TODO*
+- [io-addressbook](https://github.com/pimalaya/io-addressbook): Set of I/O-free Rust coroutines and clients to manage contacts.
+- [Cardamum](https://github.com/pimalaya/cardamum): CLI to manage contacts.
+
+## License
+
+This project is licensed under either of:
+
+- [MIT license](LICENSE-MIT)
+- [Apache License, Version 2.0](LICENSE-APACHE)
+
+at your option.
 
 ## Sponsoring
 
