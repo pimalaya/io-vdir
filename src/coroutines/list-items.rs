@@ -122,10 +122,6 @@ impl ListItems {
                                 continue;
                             };
 
-                            if ical.uids().collect::<HashSet<_>>().len() != 1 {
-                                continue;
-                            }
-
                             items.insert(Item {
                                 path,
                                 kind: ItemKind::Ical(ical),
@@ -138,10 +134,6 @@ impl ListItems {
                             let Ok(vcard) = VCard::parse(contents) else {
                                 continue;
                             };
-
-                            if vcard.uid().is_none() {
-                                continue;
-                            }
 
                             items.insert(Item {
                                 path,
