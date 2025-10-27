@@ -1,7 +1,7 @@
 [package]
 name = "io-vdir"
 description = "Set of I/O-free coroutines to manage Vdir filesystems"
-version = "0.0.1"
+version = "0.0.3"
 authors = ["soywod <clement.douin@posteo.net>"]
 edition = "2021"
 license = "MIT OR Apache-2.0"
@@ -21,7 +21,7 @@ io-fs = { version = "0.0.1", default-features = false, features = ["std"] }
 tempfile = "3.20"
 
 [dependencies]
-calcard = "0.1"
+calcard = "0.3"
 io-fs = { version = "0.0.1", default-features = false }
 log = "0.4"
 memchr = "2.7"

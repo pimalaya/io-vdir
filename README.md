@@ -54,8 +54,10 @@ for collection in collections {
 
 Have a look at projects built on the top of this library:
 
-- [io-addressbook](https://github.com/pimalaya/io-addressbook): Set of I/O-free Rust coroutines and clients to manage contacts.
+- [io-addressbook](https://github.com/pimalaya/io-addressbook): Set of I/O-free Rust coroutines to manage contacts.
+- [io-calendar](https://github.com/pimalaya/io-calendar): Set of I/O-free Rust coroutines to manage calendars.
 - [Cardamum](https://github.com/pimalaya/cardamum): CLI to manage contacts.
+- [Calendula](https://github.com/pimalaya/calendula): CLI to manage calendars.
 
 ## License
 
