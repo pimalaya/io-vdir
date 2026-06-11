@@ -51,7 +51,8 @@ use io_vdir::{coroutine::*, item::{store::*, types::ItemKind}, path::VdirPath};
 let collection = VdirPath::new("/path/to/vdir/contacts");
 let bytes = b"BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Alice\r\nEND:VCARD\r\n".to_vec();
 
-let mut coroutine = VdirItemStore::new(collection, None, ItemKind::Vcard, bytes);
+let opts = VdirItemStoreOptions::default();
+let mut coroutine = VdirItemStore::new(collection, None, ItemKind::Vcard, bytes, opts);
 let mut arg: Option<VdirReply> = None;
 
 let out = loop {

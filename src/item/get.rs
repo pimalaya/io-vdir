@@ -7,9 +7,10 @@
 //! ```rust,no_run
 //! use std::fs;
 //!
-//! use io_vdir::{coroutine::*, item::get::VdirItemGet};
+//! use io_vdir::{coroutine::*, item::get::*};
 //!
-//! let mut coroutine = VdirItemGet::new("/tmp/vdir/contacts", "alice");
+//! let opts = VdirItemGetOptions::default();
+//! let mut coroutine = VdirItemGet::new("/tmp/vdir/contacts", "alice", opts);
 //! let mut arg = None;
 //!
 //! let item = loop {
@@ -70,18 +71,33 @@ pub enum VdirItemGetError {
     Locate(#[from] VdirItemLocateError),
 }
 
+/// Options for [`VdirItemGet::new`].
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct VdirItemGetOptions {}
+
 /// Locates a Vdir item by ID and reads its contents.
 #[derive(Debug)]
 pub struct VdirItemGet {
     state: State,
+    #[allow(dead_code)]
+    opts: VdirItemGetOptions,
 }
 
 impl VdirItemGet {
     /// Creates a new coroutine that will retrieve item `id` from
     /// `collection`.
-    pub fn new(collection: impl Into<VdirPath>, id: impl ToString) -> Self {
+    pub fn new(
+        collection: impl Into<VdirPath>,
+        id: impl ToString,
+        opts: VdirItemGetOptions,
+    ) -> Self {
         Self {
-            state: State::Locate(VdirItemLocate::new(collection, id)),
+            opts,
+            state: State::Locate(VdirItemLocate::new(
+                collection,
+                id,
+                VdirItemLocateOptions::default(),
+            )),
         }
     }
 }
@@ -144,7 +160,7 @@ mod tests {
 
     #[test]
     fn locates_then_reads_contents() {
-        let mut cor = VdirItemGet::new("root/contacts", "alice");
+        let mut cor = VdirItemGet::new("root/contacts", "alice", VdirItemGetOptions::default());
 
         match cor.resume(None) {
             VdirCoroutineState::Yielded(VdirYield::WantsFileExists(_)) => {}
@@ -175,7 +191,7 @@ mod tests {
 
     #[test]
     fn locate_error_is_forwarded() {
-        let mut cor = VdirItemGet::new("root/contacts", "alice");
+        let mut cor = VdirItemGet::new("root/contacts", "alice", VdirItemGetOptions::default());
         let _ = cor.resume(None);
 
         let err = match cor.resume(Some(VdirReply::DirCreate)) {

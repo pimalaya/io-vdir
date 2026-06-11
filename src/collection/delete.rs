@@ -5,9 +5,10 @@
 //! ```rust,no_run
 //! use std::fs;
 //!
-//! use io_vdir::{collection::delete::VdirCollectionDelete, coroutine::*};
+//! use io_vdir::{collection::delete::*, coroutine::*};
 //!
-//! let mut coroutine = VdirCollectionDelete::new("/tmp/vdir/contacts");
+//! let opts = VdirCollectionDeleteOptions::default();
+//! let mut coroutine = VdirCollectionDelete::new("/tmp/vdir/contacts", opts);
 //! let mut arg = None;
 //!
 //! loop {
@@ -41,18 +42,25 @@ pub enum VdirCollectionDeleteError {
     UnexpectedArg(Option<VdirReply>),
 }
 
+/// Options for [`VdirCollectionDelete::new`].
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct VdirCollectionDeleteOptions {}
+
 /// Recursively removes the collection directory rooted at `path`.
 #[derive(Debug)]
 pub struct VdirCollectionDelete {
     state: State,
+    #[allow(dead_code)]
+    opts: VdirCollectionDeleteOptions,
 }
 
 impl VdirCollectionDelete {
     /// Creates a new coroutine that will recursively remove the
     /// collection at `path`.
-    pub fn new(path: impl Into<VdirPath>) -> Self {
+    pub fn new(path: impl Into<VdirPath>, opts: VdirCollectionDeleteOptions) -> Self {
         let paths = BTreeSet::from_iter([path.into()]);
         Self {
+            opts,
             state: State::Start { paths },
         }
     }
@@ -103,7 +111,8 @@ mod tests {
 
     #[test]
     fn removes_collection_directory() {
-        let mut cor = VdirCollectionDelete::new("root/contacts");
+        let mut cor =
+            VdirCollectionDelete::new("root/contacts", VdirCollectionDeleteOptions::default());
 
         let paths = match cor.resume(None) {
             VdirCoroutineState::Yielded(VdirYield::WantsDirRemove(paths)) => paths,
@@ -119,7 +128,8 @@ mod tests {
 
     #[test]
     fn unexpected_reply_returns_error() {
-        let mut cor = VdirCollectionDelete::new("root/contacts");
+        let mut cor =
+            VdirCollectionDelete::new("root/contacts", VdirCollectionDeleteOptions::default());
         let _ = cor.resume(None);
 
         let err = match cor.resume(Some(VdirReply::FileRemove)) {

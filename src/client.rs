@@ -25,9 +25,9 @@ use crate::{
         delete::*,
         get::*,
         list::*,
-        locate::{VdirItemLocate, VdirItemLocateError, VdirItemLocateOutput},
+        locate::*,
         r#move::*,
-        store::{VdirItemStore, VdirItemStoreError, VdirItemStoreOutput},
+        store::*,
         types::{Item, ItemKind},
     },
     path::VdirPath,
@@ -151,19 +151,28 @@ impl VdirClient {
     /// Runs [`VdirCollectionCreate`]: creates the collection directory and
     /// writes its metadata files when present.
     pub fn create_collection(&self, collection: Collection) -> Result<(), VdirClientError> {
-        self.run(VdirCollectionCreate::new(collection))
+        self.run(VdirCollectionCreate::new(
+            collection,
+            VdirCollectionCreateOptions::default(),
+        ))
     }
 
     /// Runs [`VdirCollectionDelete`]: recursively removes the collection
     /// rooted at `path`.
     pub fn delete_collection(&self, path: impl Into<VdirPath>) -> Result<(), VdirClientError> {
-        self.run(VdirCollectionDelete::new(path))
+        self.run(VdirCollectionDelete::new(
+            path,
+            VdirCollectionDeleteOptions::default(),
+        ))
     }
 
     /// Runs [`VdirCollectionList`]: enumerates every collection directly
     /// under [`self.root`](Self::root).
     pub fn list_collections(&self) -> Result<BTreeSet<Collection>, VdirClientError> {
-        self.run(VdirCollectionList::new(self.root.clone()))
+        self.run(VdirCollectionList::new(
+            self.root.clone(),
+            VdirCollectionListOptions::default(),
+        ))
     }
 
     /// Runs [`VdirCollectionRename`]: renames the collection at `path` to
@@ -173,13 +182,20 @@ impl VdirClient {
         path: impl Into<VdirPath>,
         name: impl ToString,
     ) -> Result<(), VdirClientError> {
-        self.run(VdirCollectionRename::new(path, name))
+        self.run(VdirCollectionRename::new(
+            path,
+            name,
+            VdirCollectionRenameOptions::default(),
+        ))
     }
 
     /// Runs [`VdirCollectionUpdate`]: atomically rewrites the metadata of
     /// `collection`.
     pub fn update_collection(&self, collection: Collection) -> Result<(), VdirClientError> {
-        self.run(VdirCollectionUpdate::new(collection))
+        self.run(VdirCollectionUpdate::new(
+            collection,
+            VdirCollectionUpdateOptions::default(),
+        ))
     }
 
     // ---- Items -------------------------------------------------------
@@ -191,7 +207,11 @@ impl VdirClient {
         collection: impl Into<VdirPath>,
         id: impl ToString,
     ) -> Result<(VdirPath, ItemKind), VdirClientError> {
-        let VdirItemLocateOutput { path, kind } = self.run(VdirItemLocate::new(collection, id))?;
+        let VdirItemLocateOutput { path, kind } = self.run(VdirItemLocate::new(
+            collection,
+            id,
+            VdirItemLocateOptions::default(),
+        ))?;
         Ok((path, kind))
     }
 
@@ -202,7 +222,11 @@ impl VdirClient {
         collection: impl Into<VdirPath>,
         id: impl ToString,
     ) -> Result<Item, VdirClientError> {
-        self.run(VdirItemGet::new(collection, id))
+        self.run(VdirItemGet::new(
+            collection,
+            id,
+            VdirItemGetOptions::default(),
+        ))
     }
 
     /// Runs [`VdirItemList`]: scans `collection` and returns every
@@ -211,7 +235,10 @@ impl VdirClient {
         &self,
         collection: impl Into<VdirPath>,
     ) -> Result<BTreeSet<Item>, VdirClientError> {
-        self.run(VdirItemList::new(collection))
+        self.run(VdirItemList::new(
+            collection,
+            VdirItemListOptions::default(),
+        ))
     }
 
     /// Runs [`VdirItemStore`]: writes `contents` as a new (or updated) item
@@ -227,8 +254,13 @@ impl VdirClient {
         kind: ItemKind,
         contents: Vec<u8>,
     ) -> Result<(String, VdirPath), VdirClientError> {
-        let VdirItemStoreOutput { id, path } =
-            self.run(VdirItemStore::new(collection, id, kind, contents))?;
+        let VdirItemStoreOutput { id, path } = self.run(VdirItemStore::new(
+            collection,
+            id,
+            kind,
+            contents,
+            VdirItemStoreOptions::default(),
+        ))?;
         Ok((id, path))
     }
 
@@ -239,7 +271,12 @@ impl VdirClient {
         target: impl Into<VdirPath>,
         id: impl ToString,
     ) -> Result<(), VdirClientError> {
-        self.run(VdirItemCopy::new(source, target, id))
+        self.run(VdirItemCopy::new(
+            source,
+            target,
+            id,
+            VdirItemCopyOptions::default(),
+        ))
     }
 
     /// Runs [`VdirItemMove`]: moves item `id` from `source` into `target`.
@@ -249,7 +286,12 @@ impl VdirClient {
         target: impl Into<VdirPath>,
         id: impl ToString,
     ) -> Result<(), VdirClientError> {
-        self.run(VdirItemMove::new(source, target, id))
+        self.run(VdirItemMove::new(
+            source,
+            target,
+            id,
+            VdirItemMoveOptions::default(),
+        ))
     }
 
     /// Runs [`VdirItemDelete`]: removes item `id` from `collection`.
@@ -258,7 +300,11 @@ impl VdirClient {
         collection: impl Into<VdirPath>,
         id: impl ToString,
     ) -> Result<(), VdirClientError> {
-        self.run(VdirItemDelete::new(collection, id))
+        self.run(VdirItemDelete::new(
+            collection,
+            id,
+            VdirItemDeleteOptions::default(),
+        ))
     }
 }
 

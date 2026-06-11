@@ -7,9 +7,10 @@
 //! ```rust,no_run
 //! use std::fs;
 //!
-//! use io_vdir::{coroutine::*, item::delete::VdirItemDelete};
+//! use io_vdir::{coroutine::*, item::delete::*};
 //!
-//! let mut coroutine = VdirItemDelete::new("/tmp/vdir/contacts", "alice");
+//! let opts = VdirItemDeleteOptions::default();
+//! let mut coroutine = VdirItemDelete::new("/tmp/vdir/contacts", "alice", opts);
 //! let mut arg = None;
 //!
 //! loop {
@@ -56,18 +57,33 @@ pub enum VdirItemDeleteError {
     Locate(#[from] VdirItemLocateError),
 }
 
+/// Options for [`VdirItemDelete::new`].
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct VdirItemDeleteOptions {}
+
 /// Locates a Vdir item by its ID and removes it.
 #[derive(Debug)]
 pub struct VdirItemDelete {
     state: State,
+    #[allow(dead_code)]
+    opts: VdirItemDeleteOptions,
 }
 
 impl VdirItemDelete {
     /// Creates a new coroutine that will delete item `id` from
     /// `collection`.
-    pub fn new(collection: impl Into<VdirPath>, id: impl ToString) -> Self {
+    pub fn new(
+        collection: impl Into<VdirPath>,
+        id: impl ToString,
+        opts: VdirItemDeleteOptions,
+    ) -> Self {
         Self {
-            state: State::Locate(VdirItemLocate::new(collection, id)),
+            opts,
+            state: State::Locate(VdirItemLocate::new(
+                collection,
+                id,
+                VdirItemLocateOptions::default(),
+            )),
         }
     }
 }
@@ -120,7 +136,8 @@ mod tests {
 
     #[test]
     fn removes_located_item() {
-        let mut cor = VdirItemDelete::new("root/contacts", "alice");
+        let mut cor =
+            VdirItemDelete::new("root/contacts", "alice", VdirItemDeleteOptions::default());
 
         match cor.resume(None) {
             VdirCoroutineState::Yielded(VdirYield::WantsFileExists(_)) => {}
@@ -146,7 +163,8 @@ mod tests {
 
     #[test]
     fn locate_error_is_forwarded() {
-        let mut cor = VdirItemDelete::new("root/contacts", "alice");
+        let mut cor =
+            VdirItemDelete::new("root/contacts", "alice", VdirItemDeleteOptions::default());
         let _ = cor.resume(None);
 
         let err = match cor.resume(Some(VdirReply::DirCreate)) {

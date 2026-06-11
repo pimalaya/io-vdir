@@ -10,9 +10,10 @@
 //! ```rust,no_run
 //! use std::{collections::{BTreeMap, BTreeSet}, fs};
 //!
-//! use io_vdir::{collection::list::VdirCollectionList, coroutine::*, path::VdirPath};
+//! use io_vdir::{collection::list::*, coroutine::*, path::VdirPath};
 //!
-//! let mut coroutine = VdirCollectionList::new("/tmp/vdir");
+//! let opts = VdirCollectionListOptions::default();
+//! let mut coroutine = VdirCollectionList::new("/tmp/vdir", opts);
 //! let mut arg = None;
 //!
 //! let collections = loop {
@@ -53,7 +54,10 @@
 //!         VdirCoroutineState::Yielded(VdirYield::WantsFileRead(paths)) => {
 //!             let map = paths
 //!                 .into_iter()
-//!                 .map(|p| (p.clone(), fs::read(p.as_str()).unwrap_or_default()))
+//!                 .map(|p| {
+//!                     let bytes = fs::read(p.as_str()).unwrap_or_default();
+//!                     (p, bytes)
+//!                 })
 //!                 .collect();
 //!             arg = Some(VdirReply::FileRead(map));
 //!         }
@@ -89,17 +93,24 @@ pub enum VdirCollectionListError {
     UnexpectedArg(Option<VdirReply>),
 }
 
+/// Options for [`VdirCollectionList::new`].
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct VdirCollectionListOptions {}
+
 /// Lists every Vdir collection directly under a root directory.
 #[derive(Debug)]
 pub struct VdirCollectionList {
     state: State,
+    #[allow(dead_code)]
+    opts: VdirCollectionListOptions,
 }
 
 impl VdirCollectionList {
     /// Creates a new coroutine that will list collections inside
     /// `root`.
-    pub fn new(root: impl Into<VdirPath>) -> Self {
+    pub fn new(root: impl Into<VdirPath>, opts: VdirCollectionListOptions) -> Self {
         Self {
+            opts,
             state: State::Start(root.into()),
         }
     }
@@ -281,7 +292,7 @@ mod tests {
 
     #[test]
     fn empty_root_yields_no_collections() {
-        let mut cor = VdirCollectionList::new("root");
+        let mut cor = VdirCollectionList::new("root", VdirCollectionListOptions::default());
 
         let paths = expect_wants_dir_read(&mut cor);
         assert!(paths.contains(&VdirPath::from("root")));
@@ -295,7 +306,7 @@ mod tests {
 
     #[test]
     fn bare_collection_without_metadata() {
-        let mut cor = VdirCollectionList::new("root");
+        let mut cor = VdirCollectionList::new("root", VdirCollectionListOptions::default());
         let _ = expect_wants_dir_read(&mut cor);
 
         let mut entries = BTreeMap::new();
@@ -328,7 +339,7 @@ mod tests {
 
     #[test]
     fn dotfiles_are_skipped() {
-        let mut cor = VdirCollectionList::new("root");
+        let mut cor = VdirCollectionList::new("root", VdirCollectionListOptions::default());
         let _ = expect_wants_dir_read(&mut cor);
 
         let mut entries = BTreeMap::new();
@@ -343,7 +354,7 @@ mod tests {
 
     #[test]
     fn unexpected_reply_returns_error() {
-        let mut cor = VdirCollectionList::new("root");
+        let mut cor = VdirCollectionList::new("root", VdirCollectionListOptions::default());
         let _ = expect_wants_dir_read(&mut cor);
 
         let err = match cor.resume(Some(VdirReply::DirCreate)) {

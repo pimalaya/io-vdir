@@ -8,9 +8,10 @@
 //! ```rust,no_run
 //! use std::fs;
 //!
-//! use io_vdir::{coroutine::*, item::r#move::VdirItemMove};
+//! use io_vdir::{coroutine::*, item::r#move::*};
 //!
-//! let mut coroutine = VdirItemMove::new("/tmp/vdir/contacts", "/tmp/vdir/work", "alice");
+//! let opts = VdirItemMoveOptions::default();
+//! let mut coroutine = VdirItemMove::new("/tmp/vdir/contacts", "/tmp/vdir/work", "alice", opts);
 //! let mut arg = None;
 //!
 //! loop {
@@ -57,10 +58,16 @@ pub enum VdirItemMoveError {
     Locate(#[from] VdirItemLocateError),
 }
 
+/// Options for [`VdirItemMove::new`].
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct VdirItemMoveOptions {}
+
 /// Moves a Vdir item from a source into a target collection.
 #[derive(Debug)]
 pub struct VdirItemMove {
     state: State,
+    #[allow(dead_code)]
+    opts: VdirItemMoveOptions,
 }
 
 impl VdirItemMove {
@@ -71,10 +78,12 @@ impl VdirItemMove {
         source: impl Into<VdirPath>,
         target: impl Into<VdirPath>,
         id: impl ToString,
+        opts: VdirItemMoveOptions,
     ) -> Self {
         let id = id.to_string();
-        let inner = VdirItemLocate::new(source, &id);
+        let inner = VdirItemLocate::new(source, &id, VdirItemLocateOptions::default());
         Self {
+            opts,
             state: State::Locate {
                 target: target.into(),
                 id,
@@ -136,7 +145,8 @@ mod tests {
 
     #[test]
     fn moves_located_source_to_target() {
-        let mut cor = VdirItemMove::new("root/a", "root/b", "alice");
+        let mut cor =
+            VdirItemMove::new("root/a", "root/b", "alice", VdirItemMoveOptions::default());
 
         match cor.resume(None) {
             VdirCoroutineState::Yielded(VdirYield::WantsFileExists(_)) => {}
@@ -162,7 +172,8 @@ mod tests {
 
     #[test]
     fn locate_error_is_forwarded() {
-        let mut cor = VdirItemMove::new("root/a", "root/b", "alice");
+        let mut cor =
+            VdirItemMove::new("root/a", "root/b", "alice", VdirItemMoveOptions::default());
         let _ = cor.resume(None);
 
         let err = match cor.resume(Some(VdirReply::DirCreate)) {

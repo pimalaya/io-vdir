@@ -12,10 +12,11 @@
 //! ```rust,no_run
 //! use std::fs;
 //!
-//! use io_vdir::{coroutine::*, item::{store::VdirItemStore, types::ItemKind}};
+//! use io_vdir::{coroutine::*, item::{store::*, types::ItemKind}};
 //!
 //! let bytes = b"BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Alice\r\nEND:VCARD\r\n".to_vec();
-//! let mut coroutine = VdirItemStore::new("/tmp/vdir/contacts", None, ItemKind::Vcard, bytes);
+//! let opts = VdirItemStoreOptions::default();
+//! let mut coroutine = VdirItemStore::new("/tmp/vdir/contacts", None, ItemKind::Vcard, bytes, opts);
 //! let mut arg = None;
 //!
 //! let out = loop {
@@ -75,11 +76,17 @@ pub struct VdirItemStoreOutput {
     pub path: VdirPath,
 }
 
+/// Options for [`VdirItemStore::new`].
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct VdirItemStoreOptions {}
+
 /// Writes a Vdir item under a collection, minting a UUIDv4 id when
 /// none is supplied.
 #[derive(Debug)]
 pub struct VdirItemStore {
     state: State,
+    #[allow(dead_code)]
+    opts: VdirItemStoreOptions,
 }
 
 impl VdirItemStore {
@@ -93,8 +100,10 @@ impl VdirItemStore {
         id: Option<String>,
         kind: ItemKind,
         contents: Vec<u8>,
+        opts: VdirItemStoreOptions,
     ) -> Self {
         Self {
+            opts,
             state: State::Start {
                 collection: collection.into(),
                 id,
@@ -293,6 +302,7 @@ mod tests {
             Some("alice".into()),
             ItemKind::Vcard,
             b"BEGIN:VCARD".to_vec(),
+            VdirItemStoreOptions::default(),
         );
 
         let files = match cor.resume(None) {
@@ -326,6 +336,7 @@ mod tests {
             None,
             ItemKind::Ical,
             b"BEGIN:VCAL".to_vec(),
+            VdirItemStoreOptions::default(),
         );
 
         match cor.resume(None) {
@@ -344,8 +355,8 @@ mod tests {
         let tmp = files.keys().next().unwrap();
         assert!(tmp.as_str().ends_with(".ics.tmp"));
         let id = tmp.file_name().unwrap();
-        // Version nibble (4) and variant nibble (8..=b) embedded in the
-        // canonical 8-4-4-4-12 layout.
+        // NOTE: version nibble (4) and variant nibble (8..=b) embedded in
+        // the canonical 8-4-4-4-12 layout.
         assert_eq!(id.chars().nth(14), Some('4'));
         assert!(matches!(id.chars().nth(19), Some('8'..='b')));
     }
@@ -357,6 +368,7 @@ mod tests {
             Some("alice".into()),
             ItemKind::Vcard,
             b"x".to_vec(),
+            VdirItemStoreOptions::default(),
         );
         let _ = cor.resume(None);
 

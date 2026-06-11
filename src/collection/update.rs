@@ -10,13 +10,14 @@
 //! use std::fs;
 //!
 //! use io_vdir::{
-//!     collection::{types::Collection, update::VdirCollectionUpdate},
+//!     collection::{types::Collection, update::*},
 //!     coroutine::*,
 //! };
 //!
 //! let mut collection = Collection::from_path("/tmp/vdir/contacts");
 //! collection.display_name = Some("Contacts".into());
-//! let mut coroutine = VdirCollectionUpdate::new(collection);
+//! let opts = VdirCollectionUpdateOptions::default();
+//! let mut coroutine = VdirCollectionUpdate::new(collection, opts);
 //! let mut arg = None;
 //!
 //! loop {
@@ -61,17 +62,24 @@ pub enum VdirCollectionUpdateError {
     UnexpectedArg(Option<VdirReply>),
 }
 
+/// Options for [`VdirCollectionUpdate::new`].
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct VdirCollectionUpdateOptions {}
+
 /// Rewrites Vdir collection metadata atomically via temp files.
 #[derive(Debug)]
 pub struct VdirCollectionUpdate {
     state: State,
+    #[allow(dead_code)]
+    opts: VdirCollectionUpdateOptions,
 }
 
 impl VdirCollectionUpdate {
     /// Creates a new coroutine that will write the metadata of
     /// `collection` to disk.
-    pub fn new(collection: Collection) -> Self {
+    pub fn new(collection: Collection, opts: VdirCollectionUpdateOptions) -> Self {
         Self {
+            opts,
             state: State::Start(collection),
         }
     }
@@ -161,7 +169,7 @@ mod tests {
             description: None,
             color: None,
         };
-        let mut cor = VdirCollectionUpdate::new(collection);
+        let mut cor = VdirCollectionUpdate::new(collection, VdirCollectionUpdateOptions::default());
 
         let files = match cor.resume(None) {
             VdirCoroutineState::Yielded(VdirYield::WantsFileCreate(files)) => files,
@@ -187,7 +195,10 @@ mod tests {
 
     #[test]
     fn no_metadata_completes_immediately() {
-        let mut cor = VdirCollectionUpdate::new(Collection::from_path("root/contacts"));
+        let mut cor = VdirCollectionUpdate::new(
+            Collection::from_path("root/contacts"),
+            VdirCollectionUpdateOptions::default(),
+        );
 
         match cor.resume(None) {
             VdirCoroutineState::Complete(Ok(())) => {}
@@ -203,7 +214,7 @@ mod tests {
             description: None,
             color: None,
         };
-        let mut cor = VdirCollectionUpdate::new(collection);
+        let mut cor = VdirCollectionUpdate::new(collection, VdirCollectionUpdateOptions::default());
         let _ = cor.resume(None);
 
         let err = match cor.resume(Some(VdirReply::DirExists(BTreeMap::new()))) {

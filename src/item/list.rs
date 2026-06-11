@@ -9,9 +9,10 @@
 //! ```rust,no_run
 //! use std::{collections::{BTreeMap, BTreeSet}, fs};
 //!
-//! use io_vdir::{coroutine::*, item::list::VdirItemList, path::VdirPath};
+//! use io_vdir::{coroutine::*, item::list::*, path::VdirPath};
 //!
-//! let mut coroutine = VdirItemList::new("/tmp/vdir/contacts");
+//! let opts = VdirItemListOptions::default();
+//! let mut coroutine = VdirItemList::new("/tmp/vdir/contacts", opts);
 //! let mut arg = None;
 //!
 //! let items = loop {
@@ -68,17 +69,24 @@ pub enum VdirItemListError {
     UnexpectedArg(Option<VdirReply>),
 }
 
+/// Options for [`VdirItemList::new`].
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct VdirItemListOptions {}
+
 /// Lists every `.vcf` / `.ics` item inside a Vdir collection.
 #[derive(Debug)]
 pub struct VdirItemList {
     state: State,
+    #[allow(dead_code)]
+    opts: VdirItemListOptions,
 }
 
 impl VdirItemList {
     /// Creates a new coroutine that will list every item inside
     /// `collection`.
-    pub fn new(collection: impl Into<VdirPath>) -> Self {
+    pub fn new(collection: impl Into<VdirPath>, opts: VdirItemListOptions) -> Self {
         Self {
+            opts,
             state: State::Start(collection.into()),
         }
     }
@@ -172,7 +180,7 @@ mod tests {
 
     #[test]
     fn reads_only_vcf_and_ics_entries() {
-        let mut cor = VdirItemList::new("root/contacts");
+        let mut cor = VdirItemList::new("root/contacts", VdirItemListOptions::default());
 
         let paths = expect_wants_dir_read(&mut cor);
         assert!(paths.contains(&VdirPath::from("root/contacts")));
@@ -207,7 +215,7 @@ mod tests {
 
     #[test]
     fn empty_collection_yields_no_items() {
-        let mut cor = VdirItemList::new("root/contacts");
+        let mut cor = VdirItemList::new("root/contacts", VdirItemListOptions::default());
         let _ = expect_wants_dir_read(&mut cor);
 
         let mut entries = BTreeMap::new();
@@ -221,7 +229,7 @@ mod tests {
 
     #[test]
     fn unexpected_reply_returns_error() {
-        let mut cor = VdirItemList::new("root/contacts");
+        let mut cor = VdirItemList::new("root/contacts", VdirItemListOptions::default());
         let _ = expect_wants_dir_read(&mut cor);
 
         let err = match cor.resume(Some(VdirReply::DirCreate)) {

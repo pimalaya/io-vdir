@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Reorganised the source tree into one folder per domain: the `coroutines/` folder is gone, `collection.rs` moved to `collection/types.rs`, `item.rs` moved to `item/types.rs`, and each coroutine moved to its domain folder (`collection/create.rs`, `item/locate.rs`, etc.). Types are now reached through their module (`collection::types::Collection`, `item::types::ItemKind`).
 
+- Prefixed every coroutine type (and its associated error / output types) with the crate and category, matching the io-maildir / io-m2dir naming convention: `ItemCopy` is now `VdirItemCopy`, `CollectionCreateError` is now `VdirCollectionCreateError`, and so on.
+
+- Gave every coroutine a dedicated `Options` struct threaded through `new(.., opts)`, following the io-imap / io-m2dir reference template. The structs (`VdirItemStoreOptions`, `VdirCollectionListOptions`, etc.) are empty placeholders today, reserved for future per-coroutine options without breaking the constructor signature.
+
 ### Removed
 
 - Removed the dependency on io-fs and the standalone `constants` module; per-domain constants now live next to the types that consume them.

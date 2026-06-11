@@ -8,9 +8,10 @@
 //! ```rust,no_run
 //! use std::fs;
 //!
-//! use io_vdir::{coroutine::*, item::locate::VdirItemLocate};
+//! use io_vdir::{coroutine::*, item::locate::*};
 //!
-//! let mut coroutine = VdirItemLocate::new("/tmp/vdir/contacts", "alice");
+//! let opts = VdirItemLocateOptions::default();
+//! let mut coroutine = VdirItemLocate::new("/tmp/vdir/contacts", "alice", opts);
 //! let mut arg = None;
 //!
 //! let out = loop {
@@ -67,17 +68,28 @@ pub struct VdirItemLocateOutput {
     pub kind: ItemKind,
 }
 
+/// Options for [`VdirItemLocate::new`].
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct VdirItemLocateOptions {}
+
 /// Locates a Vdir item file by its ID.
 #[derive(Clone, Debug)]
 pub struct VdirItemLocate {
     state: State,
+    #[allow(dead_code)]
+    opts: VdirItemLocateOptions,
 }
 
 impl VdirItemLocate {
     /// Creates a new coroutine that will search for item `id` inside
     /// `collection`.
-    pub fn new(collection: impl Into<VdirPath>, id: impl ToString) -> Self {
+    pub fn new(
+        collection: impl Into<VdirPath>,
+        id: impl ToString,
+        opts: VdirItemLocateOptions,
+    ) -> Self {
         Self {
+            opts,
             state: State::Start {
                 collection: collection.into(),
                 id: id.to_string(),
@@ -172,7 +184,8 @@ mod tests {
 
     #[test]
     fn found_as_vcard_returns_ok() {
-        let mut cor = VdirItemLocate::new("root/contacts", "alice");
+        let mut cor =
+            VdirItemLocate::new("root/contacts", "alice", VdirItemLocateOptions::default());
 
         let probes = expect_wants_file_exists(&mut cor);
         let vcf = VdirPath::from("root/contacts/alice.vcf");
@@ -190,7 +203,8 @@ mod tests {
 
     #[test]
     fn not_found_returns_error() {
-        let mut cor = VdirItemLocate::new("root/contacts", "alice");
+        let mut cor =
+            VdirItemLocate::new("root/contacts", "alice", VdirItemLocateOptions::default());
         let _ = expect_wants_file_exists(&mut cor);
 
         let mut map = BTreeMap::new();
@@ -202,7 +216,8 @@ mod tests {
 
     #[test]
     fn unexpected_reply_returns_error() {
-        let mut cor = VdirItemLocate::new("root/contacts", "alice");
+        let mut cor =
+            VdirItemLocate::new("root/contacts", "alice", VdirItemLocateOptions::default());
         let _ = expect_wants_file_exists(&mut cor);
 
         let err = expect_complete_err(&mut cor, Some(VdirReply::DirCreate));

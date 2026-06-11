@@ -5,9 +5,10 @@
 //! ```rust,no_run
 //! use std::fs;
 //!
-//! use io_vdir::{collection::rename::VdirCollectionRename, coroutine::*};
+//! use io_vdir::{collection::rename::*, coroutine::*};
 //!
-//! let mut coroutine = VdirCollectionRename::new("/tmp/vdir/contacts", "people");
+//! let opts = VdirCollectionRenameOptions::default();
+//! let mut coroutine = VdirCollectionRename::new("/tmp/vdir/contacts", "people", opts);
 //! let mut arg = None;
 //!
 //! loop {
@@ -41,21 +42,32 @@ pub enum VdirCollectionRenameError {
     UnexpectedArg(Option<VdirReply>),
 }
 
+/// Options for [`VdirCollectionRename::new`].
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct VdirCollectionRenameOptions {}
+
 /// Renames the collection at `path` to `name`, keeping the same parent
 /// directory.
 #[derive(Debug)]
 pub struct VdirCollectionRename {
     state: State,
+    #[allow(dead_code)]
+    opts: VdirCollectionRenameOptions,
 }
 
 impl VdirCollectionRename {
     /// Creates a new coroutine that will rename the collection at
     /// `path` to `name` (keeping the same parent directory).
-    pub fn new(path: impl Into<VdirPath>, name: impl ToString) -> Self {
+    pub fn new(
+        path: impl Into<VdirPath>,
+        name: impl ToString,
+        opts: VdirCollectionRenameOptions,
+    ) -> Self {
         let from = path.into();
         let to = from.with_file_name(&name.to_string());
 
         Self {
+            opts,
             state: State::Start {
                 pairs: vec![(from, to)],
             },
@@ -106,7 +118,11 @@ mod tests {
 
     #[test]
     fn renames_within_same_parent() {
-        let mut cor = VdirCollectionRename::new("root/contacts", "people");
+        let mut cor = VdirCollectionRename::new(
+            "root/contacts",
+            "people",
+            VdirCollectionRenameOptions::default(),
+        );
 
         let pairs = match cor.resume(None) {
             VdirCoroutineState::Yielded(VdirYield::WantsRename(pairs)) => pairs,
@@ -128,7 +144,11 @@ mod tests {
 
     #[test]
     fn unexpected_reply_returns_error() {
-        let mut cor = VdirCollectionRename::new("root/contacts", "people");
+        let mut cor = VdirCollectionRename::new(
+            "root/contacts",
+            "people",
+            VdirCollectionRenameOptions::default(),
+        );
         let _ = cor.resume(None);
 
         let err = match cor.resume(Some(VdirReply::DirCreate)) {

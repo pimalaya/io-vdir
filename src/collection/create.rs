@@ -10,11 +10,12 @@
 //! use std::fs;
 //!
 //! use io_vdir::{
-//!     collection::{create::VdirCollectionCreate, types::Collection},
+//!     collection::{create::*, types::Collection},
 //!     coroutine::*,
 //! };
 //!
-//! let mut coroutine = VdirCollectionCreate::new(Collection::from_path("/tmp/vdir/contacts"));
+//! let opts = VdirCollectionCreateOptions::default();
+//! let mut coroutine = VdirCollectionCreate::new(Collection::from_path("/tmp/vdir/contacts"), opts);
 //! let mut arg = None;
 //!
 //! loop {
@@ -57,16 +58,23 @@ pub enum VdirCollectionCreateError {
     UnexpectedArg(Option<VdirReply>),
 }
 
+/// Options for [`VdirCollectionCreate::new`].
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct VdirCollectionCreateOptions {}
+
 /// Creates a Vdir collection directory and its metadata marker files.
 #[derive(Debug)]
 pub struct VdirCollectionCreate {
     state: State,
+    #[allow(dead_code)]
+    opts: VdirCollectionCreateOptions,
 }
 
 impl VdirCollectionCreate {
     /// Creates a new coroutine that will create `collection`.
-    pub fn new(collection: Collection) -> Self {
+    pub fn new(collection: Collection, opts: VdirCollectionCreateOptions) -> Self {
         Self {
+            opts,
             state: State::Start(collection),
         }
     }
@@ -148,7 +156,7 @@ mod tests {
     #[test]
     fn bare_collection_creates_dir_only() {
         let collection = Collection::from_path("root/contacts");
-        let mut cor = VdirCollectionCreate::new(collection);
+        let mut cor = VdirCollectionCreate::new(collection, VdirCollectionCreateOptions::default());
 
         let dirs = expect_wants_dir_create(&mut cor);
         assert!(dirs.contains(&VdirPath::from("root/contacts")));
@@ -164,7 +172,7 @@ mod tests {
             description: None,
             color: Some("#3366ff".into()),
         };
-        let mut cor = VdirCollectionCreate::new(collection);
+        let mut cor = VdirCollectionCreate::new(collection, VdirCollectionCreateOptions::default());
 
         let _ = expect_wants_dir_create(&mut cor);
 
@@ -187,7 +195,7 @@ mod tests {
             description: None,
             color: None,
         };
-        let mut cor = VdirCollectionCreate::new(collection);
+        let mut cor = VdirCollectionCreate::new(collection, VdirCollectionCreateOptions::default());
 
         let _ = expect_wants_dir_create(&mut cor);
         expect_complete_ok(&mut cor, Some(VdirReply::DirCreate));
@@ -195,7 +203,10 @@ mod tests {
 
     #[test]
     fn unexpected_reply_returns_error() {
-        let mut cor = VdirCollectionCreate::new(Collection::from_path("root/contacts"));
+        let mut cor = VdirCollectionCreate::new(
+            Collection::from_path("root/contacts"),
+            VdirCollectionCreateOptions::default(),
+        );
         let _ = expect_wants_dir_create(&mut cor);
 
         let err = expect_complete_err(&mut cor, Some(VdirReply::FileCreate));
