@@ -10,7 +10,7 @@
 //! use std::fs;
 //!
 //! use io_vdir::{
-//!     collection::{types::Collection, update::*},
+//!     collection::{Collection, update::*},
 //!     coroutine::*,
 //! };
 //!
@@ -49,9 +49,9 @@ use log::trace;
 use thiserror::Error;
 
 use crate::{
-    collection::types::{COLOR, Collection, DESCRIPTION, DISPLAYNAME},
+    collection::{COLOR, Collection, DESCRIPTION, DISPLAYNAME},
     coroutine::*,
-    item::types::TMP,
+    item::TMP,
     path::VdirPath,
 };
 

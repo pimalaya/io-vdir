@@ -11,6 +11,7 @@ use alloc::{
     string::{String, ToString},
     vec::Vec,
 };
+
 use std::{fs, io};
 
 use getrandom::fill;
@@ -18,18 +19,9 @@ use log::trace;
 use thiserror::Error;
 
 use crate::{
-    collection::{create::*, delete::*, list::*, rename::*, types::Collection, update::*},
+    collection::{Collection, create::*, delete::*, list::*, rename::*, update::*},
     coroutine::*,
-    item::{
-        copy::*,
-        delete::*,
-        get::*,
-        list::*,
-        locate::*,
-        r#move::*,
-        store::*,
-        types::{Item, ItemKind},
-    },
+    item::{Item, ItemKind, copy::*, delete::*, get::*, list::*, locate::*, r#move::*, store::*},
     path::VdirPath,
 };
 

@@ -22,7 +22,7 @@ pub const COLOR: &str = "color";
 /// iCalendar files). A collection may also carry the optional
 /// [metadata] files defined by the vdirsyncer specification.
 ///
-/// See [`crate::item::types::Item`].
+/// See [`crate::item::Item`].
 ///
 /// [metadata]: https://vdirsyncer.pimutils.org/en/stable/vdir.html#metadata
 #[derive(Clone, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]

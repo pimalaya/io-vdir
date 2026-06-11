@@ -5,9 +5,7 @@
 
 use std::path::Path;
 
-use io_vdir::{
-    client::VdirClient, collection::types::Collection, item::types::ItemKind, path::VdirPath,
-};
+use io_vdir::{client::VdirClient, collection::Collection, item::ItemKind, path::VdirPath};
 use tempfile::tempdir;
 
 #[test]

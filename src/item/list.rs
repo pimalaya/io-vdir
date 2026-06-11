@@ -58,7 +58,7 @@ use thiserror::Error;
 
 use crate::{
     coroutine::*,
-    item::types::{Item, ItemKind},
+    item::{Item, ItemKind},
     path::VdirPath,
 };
 

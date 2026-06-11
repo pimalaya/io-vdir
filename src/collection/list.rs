@@ -81,7 +81,7 @@ use log::trace;
 use thiserror::Error;
 
 use crate::{
-    collection::types::{COLOR, Collection, DESCRIPTION, DISPLAYNAME},
+    collection::{COLOR, Collection, DESCRIPTION, DISPLAYNAME},
     coroutine::*,
     path::VdirPath,
 };

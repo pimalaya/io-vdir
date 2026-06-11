@@ -1,7 +1,6 @@
 //! Vdir items: I/O-free coroutines for the item lifecycle (store,
-//! get, list, locate, copy, move, delete), plus the
-//! [`Item`](types::Item) handle and [`ItemKind`](types::ItemKind)
-//! under [`types`].
+//! get, list, locate, copy, move, delete), plus the [`Item`] handle
+//! and [`ItemKind`].
 //!
 //! An item is a single vCard ([RFC 6350]) or iCalendar ([RFC 5545])
 //! file, as laid out by the [vdir specification].
@@ -17,4 +16,7 @@ pub mod list;
 pub mod locate;
 pub mod r#move;
 pub mod store;
-pub mod types;
+mod types;
+
+#[doc(inline)]
+pub use types::*;

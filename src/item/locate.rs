@@ -47,7 +47,7 @@ use thiserror::Error;
 
 use crate::{
     coroutine::*,
-    item::types::{ICS, ItemKind, VCF},
+    item::{ICS, ItemKind, VCF},
     path::VdirPath,
 };
 

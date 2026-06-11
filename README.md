@@ -46,7 +46,7 @@ Drive a multi-step command (store an item) against a blocking caller (the same s
 ```rust,no_run
 use std::{collections::hash_map::RandomState, fs, hash::{BuildHasher, Hasher}};
 
-use io_vdir::{coroutine::*, item::{store::*, types::ItemKind}, path::VdirPath};
+use io_vdir::{coroutine::*, item::{store::*, ItemKind}, path::VdirPath};
 
 let collection = VdirPath::new("/path/to/vdir/contacts");
 let bytes = b"BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Alice\r\nEND:VCARD\r\n".to_vec();
@@ -101,7 +101,7 @@ io-vdir = "0.0.3" # client is enabled by default
 ```
 
 ```rust,no_run
-use io_vdir::{client::VdirClient, collection::types::Collection, item::types::ItemKind};
+use io_vdir::{client::VdirClient, collection::Collection, item::ItemKind};
 
 let client = VdirClient::new("/path/to/vdir");
 

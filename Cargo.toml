@@ -32,7 +32,7 @@ tempfile = "3.20"
 
 [dependencies]
 calcard = { version = "0.3", optional = true }
-getrandom = { version = "0.3", optional = true }
+getrandom = { version = "0.4", optional = true }
 log = { version = "0.4", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"], optional = true }
 thiserror = { version = "2", default-features = false }

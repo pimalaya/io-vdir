@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Gave every coroutine a dedicated `Options` struct threaded through `new(.., opts)`, following the io-imap / io-m2dir reference template. The structs (`VdirItemStoreOptions`, `VdirCollectionListOptions`, etc.) are empty placeholders today, reserved for future per-coroutine options without breaking the constructor signature.
 
+- Made the per-domain `types` modules private and re-exported their contents with `#[doc(inline)] pub use types::*;`, flattening the public path: types are now reached at `collection::Collection` / `item::ItemKind` instead of `collection::types::Collection` / `item::types::ItemKind`.
+
 ### Removed
 
 - Removed the dependency on io-fs and the standalone `constants` module; per-domain constants now live next to the types that consume them.

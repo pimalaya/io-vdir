@@ -6,9 +6,7 @@
 //! cargo run --example std_store_item
 //! ```
 
-use io_vdir::{
-    client::VdirClient, collection::types::Collection, item::types::ItemKind, path::VdirPath,
-};
+use io_vdir::{client::VdirClient, collection::Collection, item::ItemKind, path::VdirPath};
 use tempfile::tempdir;
 
 fn main() {

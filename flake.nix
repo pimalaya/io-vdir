@@ -1,5 +1,5 @@
 {
-  description = "CLI and lib to manage OAuth 2.0 tokens, written in Rust";
+  description = "Vdir client library, written in Rust";
 
   inputs = {
     nixpkgs = {

@@ -12,7 +12,7 @@
 //! ```rust,no_run
 //! use std::fs;
 //!
-//! use io_vdir::{coroutine::*, item::{store::*, types::ItemKind}};
+//! use io_vdir::{coroutine::*, item::{store::*, ItemKind}};
 //!
 //! let bytes = b"BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Alice\r\nEND:VCARD\r\n".to_vec();
 //! let opts = VdirItemStoreOptions::default();
@@ -55,7 +55,7 @@ use thiserror::Error;
 
 use crate::{
     coroutine::*,
-    item::types::{ItemKind, TMP},
+    item::{ItemKind, TMP},
     path::VdirPath,
 };
 
