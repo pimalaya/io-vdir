@@ -69,7 +69,10 @@ pub trait VdirCoroutine {
 pub enum VdirYield {
     /// Driver must supply `len` random bytes and feed back
     /// [`VdirReply::Random`].
-    WantsRandom { len: usize },
+    WantsRandom {
+        /// Number of random bytes the driver must supply.
+        len: usize,
+    },
 
     /// Driver must check each path for existence as a regular file and
     /// feed back [`VdirReply::FileExists`].

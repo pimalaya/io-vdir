@@ -81,7 +81,7 @@ use log::trace;
 use thiserror::Error;
 
 use crate::{
-    collection::{COLOR, Collection, DESCRIPTION, DISPLAYNAME},
+    collection::{COLOR, DESCRIPTION, DISPLAYNAME, VdirCollection},
     coroutine::*,
     path::VdirPath,
 };
@@ -89,6 +89,8 @@ use crate::{
 /// Failure causes during a [`VdirCollectionList`] step.
 #[derive(Clone, Debug, Error)]
 pub enum VdirCollectionListError {
+    /// The driver fed back a reply that does not match the pending
+    /// request.
     #[error("Vdir collection list failed: unexpected arg {0:?}")]
     UnexpectedArg(Option<VdirReply>),
 }
@@ -118,11 +120,9 @@ impl VdirCollectionList {
 
 impl VdirCoroutine for VdirCollectionList {
     type Yield = VdirYield;
-    type Return = Result<BTreeSet<Collection>, VdirCollectionListError>;
+    type Return = Result<BTreeSet<VdirCollection>, VdirCollectionListError>;
 
     fn resume(&mut self, arg: Option<VdirReply>) -> VdirCoroutineState<Self::Yield, Self::Return> {
-        trace!("collection list: {}", self.state);
-
         match (&mut self.state, arg) {
             (State::Start(root), None) => {
                 let paths = BTreeSet::from_iter([mem::take(root)]);
@@ -195,7 +195,7 @@ impl VdirCoroutine for VdirCollectionList {
                 if probes.is_empty() {
                     let collections = collection_paths
                         .into_iter()
-                        .map(Collection::from_path)
+                        .map(VdirCollection::from_path)
                         .collect();
                     return VdirCoroutineState::Complete(Ok(collections));
                 }
@@ -214,9 +214,9 @@ impl VdirCoroutine for VdirCollectionList {
                 },
                 Some(VdirReply::FileRead(mut contents)),
             ) => {
-                let mut by_path: BTreeMap<VdirPath, Collection> = mem::take(collection_paths)
+                let mut by_path: BTreeMap<VdirPath, VdirCollection> = mem::take(collection_paths)
                     .into_iter()
-                    .map(|path| (path.clone(), Collection::from_path(path)))
+                    .map(|path| (path.clone(), VdirCollection::from_path(path)))
                     .collect();
 
                 for (probe, owner) in mem::take(probes) {
@@ -245,7 +245,7 @@ impl VdirCoroutine for VdirCollectionList {
                     }
                 }
 
-                let collections: BTreeSet<Collection> = by_path.into_values().collect();
+                let collections: BTreeSet<VdirCollection> = by_path.into_values().collect();
                 trace!("found {} collections", collections.len());
                 VdirCoroutineState::Complete(Ok(collections))
             }
@@ -364,8 +364,6 @@ mod tests {
         assert!(matches!(err, VdirCollectionListError::UnexpectedArg(_)));
     }
 
-    // --- utils
-
     fn expect_wants_dir_read(cor: &mut VdirCollectionList) -> BTreeSet<VdirPath> {
         match cor.resume(None) {
             VdirCoroutineState::Yielded(VdirYield::WantsDirRead(paths)) => paths,
@@ -376,7 +374,7 @@ mod tests {
     fn expect_complete_ok(
         cor: &mut VdirCollectionList,
         arg: Option<VdirReply>,
-    ) -> BTreeSet<Collection> {
+    ) -> BTreeSet<VdirCollection> {
         match cor.resume(arg) {
             VdirCoroutineState::Complete(Ok(collections)) => collections,
             state => panic!("expected Complete(Ok), got {state:?}"),

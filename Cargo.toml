@@ -1,12 +1,12 @@
 [package]
 name = "io-vdir"
-description = "Vdir client library"
+description = "Vdir client library for Rust"
 version = "0.0.3"
-authors = ["soywod <clement.douin@posteo.net>"]
-edition = "2024"
+authors = ["soywod <pimalaya.org@posteo.net>"]
 rust-version = "1.87"
+edition = "2024"
 license = "MIT OR Apache-2.0"
-categories = ["api-bindings", "filesystem"]
+categories = ["api-bindings", "filesystem", "no-std"]
 keywords = ["io-free", "coroutine", "vdir", "vcard", "ical"]
 homepage = "https://pimalaya.org"
 documentation = "https://docs.rs/io-vdir/latest/io_vdir"
@@ -24,6 +24,7 @@ serde = ["dep:serde"]
 
 [[example]]
 name = "std_store_item"
+path = "examples/std_store_item.rs"
 required-features = ["client"]
 
 [dev-dependencies]
@@ -31,8 +32,8 @@ env_logger = "0.11"
 tempfile = "3.20"
 
 [dependencies]
-calcard = { version = "0.3", optional = true }
-getrandom = { version = "0.4", optional = true }
+calcard = { version = "0.3", default-features = false, optional = true }
+getrandom = { version = "0.4", default-features = false, optional = true }
 log = { version = "0.4", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"], optional = true }
 thiserror = { version = "2", default-features = false }

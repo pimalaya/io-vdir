@@ -30,7 +30,6 @@ use core::{fmt, mem};
 
 use alloc::{string::ToString, vec::Vec};
 
-use log::trace;
 use thiserror::Error;
 
 use crate::{coroutine::*, path::VdirPath};
@@ -38,6 +37,8 @@ use crate::{coroutine::*, path::VdirPath};
 /// Failure causes during a [`VdirCollectionRename`] step.
 #[derive(Clone, Debug, Error)]
 pub enum VdirCollectionRenameError {
+    /// The driver fed back a reply that does not match the pending
+    /// request.
     #[error("Vdir collection rename failed: unexpected arg {0:?}")]
     UnexpectedArg(Option<VdirReply>),
 }
@@ -80,8 +81,6 @@ impl VdirCoroutine for VdirCollectionRename {
     type Return = Result<(), VdirCollectionRenameError>;
 
     fn resume(&mut self, arg: Option<VdirReply>) -> VdirCoroutineState<Self::Yield, Self::Return> {
-        trace!("collection rename: {}", self.state);
-
         match (&mut self.state, arg) {
             (State::Start { pairs }, None) => {
                 let pairs = mem::take(pairs);

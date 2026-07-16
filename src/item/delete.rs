@@ -42,7 +42,6 @@ use core::fmt;
 
 use alloc::{collections::BTreeSet, string::ToString};
 
-use log::trace;
 use thiserror::Error;
 
 use crate::{coroutine::*, item::locate::*, path::VdirPath, vdir_try};
@@ -50,9 +49,12 @@ use crate::{coroutine::*, item::locate::*, path::VdirPath, vdir_try};
 /// Failure causes during a [`VdirItemDelete`] step.
 #[derive(Clone, Debug, Error)]
 pub enum VdirItemDeleteError {
+    /// The driver fed back a reply that does not match the pending
+    /// request.
     #[error("Vdir item delete failed: unexpected arg {0:?}")]
     UnexpectedArg(Option<VdirReply>),
 
+    /// The inner locate coroutine failed.
     #[error(transparent)]
     Locate(#[from] VdirItemLocateError),
 }
@@ -93,8 +95,6 @@ impl VdirCoroutine for VdirItemDelete {
     type Return = Result<(), VdirItemDeleteError>;
 
     fn resume(&mut self, arg: Option<VdirReply>) -> VdirCoroutineState<Self::Yield, Self::Return> {
-        trace!("item delete: {}", self.state);
-
         match (&mut self.state, arg) {
             (State::Locate(c), arg) => {
                 let out = vdir_try!(c, arg);

@@ -5,7 +5,7 @@
 
 use std::path::Path;
 
-use io_vdir::{client::VdirClient, collection::Collection, item::ItemKind, path::VdirPath};
+use io_vdir::{client::VdirClient, collection::VdirCollection, item::VdirItemKind, path::VdirPath};
 use tempfile::tempdir;
 
 #[test]
@@ -23,13 +23,13 @@ fn end_to_end() {
     assert!(collections.is_empty(), "root should be empty initially");
 
     // create two collections
-    let contacts = Collection {
+    let contacts = VdirCollection {
         path: root.join("contacts"),
         display_name: Some("Contacts".into()),
         description: Some("Personal contacts".into()),
         color: Some("#3366ff".into()),
     };
-    let work = Collection {
+    let work = VdirCollection {
         path: root.join("work"),
         display_name: None,
         description: None,
@@ -74,7 +74,7 @@ fn end_to_end() {
         .store_item(
             contacts.path.clone(),
             Some(String::from("alice")),
-            ItemKind::Vcard,
+            VdirItemKind::Vcard,
             b"BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Alice\r\nEND:VCARD\r\n".to_vec(),
         )
         .expect("store alice");
@@ -87,7 +87,7 @@ fn end_to_end() {
         .store_item(
             contacts.path.clone(),
             None,
-            ItemKind::Vcard,
+            VdirItemKind::Vcard,
             b"BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Bob\r\nEND:VCARD\r\n".to_vec(),
         )
         .expect("store bob");
@@ -105,14 +105,14 @@ fn end_to_end() {
         .locate_item(contacts.path.clone(), "alice")
         .expect("locate alice");
     assert_eq!(located_path, path_a);
-    assert!(matches!(kind, ItemKind::Vcard));
+    assert!(matches!(kind, VdirItemKind::Vcard));
 
     // get alice and verify contents round-trip
     let alice = client
         .get_item(contacts.path.clone(), "alice")
         .expect("get alice");
     assert_eq!(alice.path, path_a);
-    assert!(matches!(alice.kind, ItemKind::Vcard));
+    assert!(matches!(alice.kind, VdirItemKind::Vcard));
     assert!(alice.contents.starts_with(b"BEGIN:VCARD"));
 
     // overwrite alice via store_item with the same id
@@ -120,7 +120,7 @@ fn end_to_end() {
         .store_item(
             contacts.path.clone(),
             Some(String::from("alice")),
-            ItemKind::Vcard,
+            VdirItemKind::Vcard,
             b"BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Alice Smith\r\nEND:VCARD\r\n".to_vec(),
         )
         .expect("overwrite alice");

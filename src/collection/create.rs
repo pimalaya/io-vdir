@@ -10,12 +10,12 @@
 //! use std::fs;
 //!
 //! use io_vdir::{
-//!     collection::{create::*, Collection},
+//!     collection::{create::*, VdirCollection},
 //!     coroutine::*,
 //! };
 //!
 //! let opts = VdirCollectionCreateOptions::default();
-//! let mut coroutine = VdirCollectionCreate::new(Collection::from_path("/tmp/vdir/contacts"), opts);
+//! let mut coroutine = VdirCollectionCreate::new(VdirCollection::from_path("/tmp/vdir/contacts"), opts);
 //! let mut arg = None;
 //!
 //! loop {
@@ -43,17 +43,18 @@ use core::{fmt, mem};
 
 use alloc::collections::{BTreeMap, BTreeSet};
 
-use log::trace;
 use thiserror::Error;
 
 use crate::{
-    collection::{COLOR, Collection, DESCRIPTION, DISPLAYNAME},
+    collection::{COLOR, DESCRIPTION, DISPLAYNAME, VdirCollection},
     coroutine::*,
 };
 
 /// Failure causes during a [`VdirCollectionCreate`] step.
 #[derive(Clone, Debug, Error)]
 pub enum VdirCollectionCreateError {
+    /// The driver fed back a reply that does not match the pending
+    /// request.
     #[error("Vdir collection create failed: unexpected arg {0:?}")]
     UnexpectedArg(Option<VdirReply>),
 }
@@ -72,7 +73,7 @@ pub struct VdirCollectionCreate {
 
 impl VdirCollectionCreate {
     /// Creates a new coroutine that will create `collection`.
-    pub fn new(collection: Collection, opts: VdirCollectionCreateOptions) -> Self {
+    pub fn new(collection: VdirCollection, opts: VdirCollectionCreateOptions) -> Self {
         Self {
             opts,
             state: State::Start(collection),
@@ -85,8 +86,6 @@ impl VdirCoroutine for VdirCollectionCreate {
     type Return = Result<(), VdirCollectionCreateError>;
 
     fn resume(&mut self, arg: Option<VdirReply>) -> VdirCoroutineState<Self::Yield, Self::Return> {
-        trace!("collection create: {}", self.state);
-
         match (&mut self.state, arg) {
             (State::Start(collection), None) => {
                 let collection = mem::take(collection);
@@ -130,8 +129,8 @@ impl VdirCoroutine for VdirCollectionCreate {
 
 #[derive(Debug)]
 enum State {
-    Start(Collection),
-    AwaitDirCreate(Collection),
+    Start(VdirCollection),
+    AwaitDirCreate(VdirCollection),
     AwaitFileCreate,
 }
 
@@ -155,7 +154,7 @@ mod tests {
 
     #[test]
     fn bare_collection_creates_dir_only() {
-        let collection = Collection::from_path("root/contacts");
+        let collection = VdirCollection::from_path("root/contacts");
         let mut cor = VdirCollectionCreate::new(collection, VdirCollectionCreateOptions::default());
 
         let dirs = expect_wants_dir_create(&mut cor);
@@ -166,7 +165,7 @@ mod tests {
 
     #[test]
     fn metadata_collection_writes_marker_files() {
-        let collection = Collection {
+        let collection = VdirCollection {
             path: VdirPath::from("root/contacts"),
             display_name: Some("Contacts".into()),
             description: None,
@@ -189,7 +188,7 @@ mod tests {
 
     #[test]
     fn empty_metadata_fields_are_skipped() {
-        let collection = Collection {
+        let collection = VdirCollection {
             path: VdirPath::from("root/contacts"),
             display_name: Some(String::new()),
             description: None,
@@ -204,7 +203,7 @@ mod tests {
     #[test]
     fn unexpected_reply_returns_error() {
         let mut cor = VdirCollectionCreate::new(
-            Collection::from_path("root/contacts"),
+            VdirCollection::from_path("root/contacts"),
             VdirCollectionCreateOptions::default(),
         );
         let _ = expect_wants_dir_create(&mut cor);
@@ -212,8 +211,6 @@ mod tests {
         let err = expect_complete_err(&mut cor, Some(VdirReply::FileCreate));
         assert!(matches!(err, VdirCollectionCreateError::UnexpectedArg(_)));
     }
-
-    // --- utils
 
     fn expect_wants_dir_create(cor: &mut VdirCollectionCreate) -> BTreeSet<VdirPath> {
         match cor.resume(None) {

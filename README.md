@@ -1,162 +1,71 @@
 # I/O Vdir [![Documentation](https://img.shields.io/docsrs/io-vdir?style=flat&logo=docs.rs&logoColor=white)](https://docs.rs/io-vdir/latest/io_vdir) [![Matrix](https://img.shields.io/badge/chat-%23pimalaya-blue?style=flat&logo=matrix&logoColor=white)](https://matrix.to/#/#pimalaya:matrix.org) [![Mastodon](https://img.shields.io/badge/news-%40pimalaya-blue?style=flat&logo=mastodon&logoColor=white)](https://fosstodon.org/@pimalaya)
 
-Vdir client library, written in Rust.
+Vdir client library for Rust
 
-This library manages vCard (`.vcf`) and iCalendar (`.ics`) files inside [Vdir](https://vdirsyncer.pimutils.org/en/stable/vdir.html) filesystems. It is composed of 2 feature-gated layers:
+This library is composed of 2 feature-gated layers:
 
-- Low-level **I/O-free** coroutines: these `no_std`-compatible state machines contain the whole Vdir logic and can be used anywhere
-- Mid-level **std client**: a standard, blocking Vdir client built on `std::fs`
+- Low-level **I/O-free** coroutines: no_std-compatible state machines containing the whole Vdir logic, usable anywhere
+- Mid-level **standard client**: a blocking client that runs the coroutines against the local filesystem for you
 
 ## Table of contents
 
 - [Features](#features)
+- [Specification coverage](#specification-coverage)
 - [Usage](#usage)
-  - [Coroutines](#coroutines)
-  - [Std client](#std-client)
 - [Examples](#examples)
-- [License](#license)
 - [AI disclosure](#ai-disclosure)
+- [License](#license)
 - [Social](#social)
+- [Contributing](#contributing)
 - [Sponsoring](#sponsoring)
 
 ## Features
 
-- **I/O-free** coroutines: `no_std` state machines; no filesystem calls, no async runtime, no `std` required, drive against any blocking, async, or fuzz harness.
-- Standard, blocking client (requires `client` feature) backed by `std::fs`.
-- **Collections**: create, delete, list, rename and update directories of items, including the optional `displayname`, `description` and `color` metadata markers.
-- **Items**: store, get, list, locate, copy, move and delete vCard and iCalendar files, with atomic writes via a temporary file then rename.
-- **Optional parsing** (`parser` feature): decode item bytes into [calcard](https://docs.rs/calcard) vCard or iCalendar values.
+- **I/O-free core**: state machines carrying the whole Vdir logic, with no filesystem calls and no async runtime, so the same operations drive blocking, async or test harnesses.
+- **Standard client**: an optional blocking client that runs every operation against the local filesystem for you.
+- **Collections**: create, delete, list, rename and update collection directories, including the optional display name, description and color metadata markers.
+- **Items**: store, get, list, locate, copy, move and delete contact and calendar files, written atomically through a temporary file and a rename.
+- **Optional parsing**: decode item bytes into contact or calendar values on demand.
 
 > [!TIP]
-> I/O Vdir is written in [Rust](https://www.rust-lang.org/) and uses [cargo features](https://doc.rust-lang.org/cargo/reference/features.html). The default feature set is declared in [Cargo.toml](./Cargo.toml) or on [docs.rs](https://docs.rs/crate/io-vdir/latest/features).
+> Each layer is toggled through a cargo feature; the default set is listed in [Cargo.toml](./Cargo.toml) and on [docs.rs](https://docs.rs/crate/io-vdir/latest/features).
+
+## Specification coverage
+
+The library implements the [Vdir storage format](https://vdirsyncer.pimutils.org/en/stable/vdir.html): collections are directories, items are files inside them, and metadata lives in a small set of marker files. Items are either contacts ([vCard](https://www.rfc-editor.org/rfc/rfc6350)) or calendar objects ([iCalendar](https://www.rfc-editor.org/rfc/rfc5545)); the core treats them as opaque bytes and the optional parser decodes them.
 
 ## Usage
 
-Every coroutine implements the `VdirCoroutine` trait. Its `resume(arg: Option<VdirReply>)` method returns a `VdirCoroutineState<Yield, Return>` with two variants:
-
-- `Yielded(Y)`: intermediate. `Y` is the per-coroutine yield type; every io-vdir coroutine picks the standard `VdirYield`, whose variants are `WantsRandom { len }`, `WantsDirCreate`, `WantsDirRead`, `WantsDirExists`, `WantsDirRemove`, `WantsFileCreate`, `WantsFileRead`, `WantsFileExists`, `WantsFileRemove`, `WantsRename`, `WantsCopy`. The driver services the request and feeds back the matching `VdirReply` variant on the next `resume`.
-- `Complete(R)`: terminal. By convention `R = Result<Output, Error>` carrying the operation's final value.
-
-### Coroutines
-
-No features required: works in `#![no_std]`, no filesystem calls, no async runtime. You own the loop and the syscalls; the library only computes the operations to perform and consumes their results.
-
-Drive a multi-step command (store an item) against a blocking caller (the same shape works under async or in-memory replay):
-
-```rust,no_run
-use std::{collections::hash_map::RandomState, fs, hash::{BuildHasher, Hasher}};
-
-use io_vdir::{coroutine::*, item::{store::*, ItemKind}, path::VdirPath};
-
-let collection = VdirPath::new("/path/to/vdir/contacts");
-let bytes = b"BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Alice\r\nEND:VCARD\r\n".to_vec();
-
-let opts = VdirItemStoreOptions::default();
-let mut coroutine = VdirItemStore::new(collection, None, ItemKind::Vcard, bytes, opts);
-let mut arg: Option<VdirReply> = None;
-
-let out = loop {
-    match coroutine.resume(arg.take()) {
-        VdirCoroutineState::Complete(Ok(out)) => break out,
-        VdirCoroutineState::Complete(Err(err)) => panic!("{err}"),
-        VdirCoroutineState::Yielded(VdirYield::WantsRandom { len }) => {
-            // Real code fills via the OS RNG; this xorshift64* keeps the
-            // example dependency-free.
-            let mut out = vec![0u8; len];
-            let mut state = RandomState::new().build_hasher().finish();
-            for byte in &mut out {
-                state ^= state << 13;
-                state ^= state >> 7;
-                state ^= state << 17;
-                *byte = state as u8;
-            }
-            arg = Some(VdirReply::Random(out));
-        }
-        VdirCoroutineState::Yielded(VdirYield::WantsFileCreate(files)) => {
-            for (path, bytes) in files {
-                fs::write(path.as_str(), &bytes).unwrap();
-            }
-            arg = Some(VdirReply::FileCreate);
-        }
-        VdirCoroutineState::Yielded(VdirYield::WantsRename(pairs)) => {
-            for (from, to) in pairs {
-                fs::rename(from.as_str(), to.as_str()).unwrap();
-            }
-            arg = Some(VdirReply::Rename);
-        }
-        VdirCoroutineState::Yielded(other) => unreachable!("VdirItemStore yielded {other:?}"),
-    }
-};
-
-println!("stored {} at {}", out.id, out.path);
-```
-
-### Std client
-
-Enable the `client` feature (on by default). `VdirClient::new(root)` wraps a filesystem root and exposes one method per coroutine; the resume loop is driven for you via `VdirClient::run` and `std::fs`.
-
-```toml,ignore
-[dependencies]
-io-vdir = "0.0.3" # client is enabled by default
-```
-
-```rust,no_run
-use io_vdir::{client::VdirClient, collection::Collection, item::ItemKind};
-
-let client = VdirClient::new("/path/to/vdir");
-
-let contacts = Collection::from_path("/path/to/vdir/contacts");
-client.create_collection(contacts).unwrap();
-
-let bytes = b"BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Alice\r\nEND:VCARD\r\n".to_vec();
-let (id, path) = client
-    .store_item("/path/to/vdir/contacts", None, ItemKind::Vcard, bytes)
-    .unwrap();
-
-println!("stored {id} at {path}");
-```
-
-*See complete examples at [./examples](https://github.com/pimalaya/io-vdir/blob/master/examples).*
+The whole API is documented on [docs.rs](https://docs.rs/io-vdir/latest/io_vdir), including runnable snippets for every coroutine and for the standard client.
 
 ## Examples
 
-Have a look at real-world projects built on top of this library:
-
-- [io-addressbook](https://github.com/pimalaya/io-addressbook): Set of I/O-free Rust coroutines to manage contacts.
-- [io-calendar](https://github.com/pimalaya/io-calendar): Set of I/O-free Rust coroutines to manage calendars.
-- [Cardamum](https://github.com/pimalaya/cardamum): CLI to manage contacts.
-- [Calendula](https://github.com/pimalaya/calendula): CLI to manage calendars.
-
-## License
-
-This project is licensed under either of:
-
-- [MIT license](LICENSE-MIT)
-- [Apache License, Version 2.0](LICENSE-APACHE)
-
-at your option.
+Complete runnable programs live in [./examples](./examples); the tests also demonstrate real usage.
 
 ## AI disclosure
 
 This project is developed with AI assistance. This section documents how, so users and downstream packagers can make informed decisions.
 
-- **Tools**: Claude Code (Anthropic), Opus 4.7, invoked locally with a persistent project-scoped memory and a small set of repo-specific rules.
-
+- **Tools**: Claude Code (Anthropic), invoked locally with a persistent project-scoped memory and a small set of repo-specific rules.
 - **Used for**: Refactors, mechanical multi-file edits, boilerplate (feature gates, error enums, derive macros, trait impls), test scaffolding, doc polish, exploratory design conversations.
-
 - **Not used for**: Engineering, critical code, git manipulation (commit, merge, rebase…), real-world tests.
+- **Verification**: Every AI-assisted change is read, compiled, tested, and formatted before commit. Behavioural correctness is verified against the relevant RFC or upstream spec, not assumed from the model output. Tests are never adjusted to fit AI-generated code; the code is adjusted to fit correct behaviour.
+- **Limitations**: AI models occasionally produce code that compiles and passes tests but is subtly wrong. The verification workflow catches most of this; it does not catch all of it. Bug reports are welcome and taken seriously.
+- **Last reviewed**: 16/07/2026
 
-- **Verification**: Every AI-assisted change is read, compiled, tested, and formatted before commit (`nix develop --command cargo check / cargo test / cargo fmt`). Behavioural correctness is verified against the relevant RFC or upstream spec, not assumed from the model output. Tests are never adjusted to fit AI-generated code; the code is adjusted to fit correct behaviour.
+## License
 
-- **Limitations**: AI models occasionally produce code that compiles and passes tests but is subtly wrong: off-by-one errors, missed edge cases, plausible but nonexistent APIs, stale RFC references. The verification workflow catches most of this; it does not catch all of it. Bug reports are welcome and taken seriously.
-
-- **Last reviewed**: 31/05/2026
+This project is dual-licensed under the [MIT](./LICENSE-MIT) and [Apache 2.0](./LICENSE-APACHE) licenses.
 
 ## Social
 
 - Chat on [Matrix](https://matrix.to/#/#pimalaya:matrix.org)
 - News on [Mastodon](https://fosstodon.org/@pimalaya) or [RSS](https://fosstodon.org/@pimalaya.rss)
 - Mail at [pimalaya.org@posteo.net](mailto:pimalaya.org@posteo.net)
+
+## Contributing
+
+Contributions are welcome: start with [CONTRIBUTING.md](./CONTRIBUTING.md), which opens with the Pimalaya-wide guides to read first.
 
 ## Sponsoring
 

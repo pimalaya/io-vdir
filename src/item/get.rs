@@ -48,12 +48,11 @@ use core::{fmt, mem};
 
 use alloc::{collections::BTreeSet, string::ToString};
 
-use log::trace;
 use thiserror::Error;
 
 use crate::{
     coroutine::*,
-    item::{Item, ItemKind, locate::*},
+    item::{VdirItem, VdirItemKind, locate::*},
     path::VdirPath,
     vdir_try,
 };
@@ -61,9 +60,12 @@ use crate::{
 /// Failure causes during a [`VdirItemGet`] step.
 #[derive(Clone, Debug, Error)]
 pub enum VdirItemGetError {
+    /// The driver fed back a reply that does not match the pending
+    /// request.
     #[error("Vdir item get failed: unexpected arg {0:?}")]
     UnexpectedArg(Option<VdirReply>),
 
+    /// The inner locate coroutine failed.
     #[error(transparent)]
     Locate(#[from] VdirItemLocateError),
 }
@@ -101,11 +103,9 @@ impl VdirItemGet {
 
 impl VdirCoroutine for VdirItemGet {
     type Yield = VdirYield;
-    type Return = Result<Item, VdirItemGetError>;
+    type Return = Result<VdirItem, VdirItemGetError>;
 
     fn resume(&mut self, arg: Option<VdirReply>) -> VdirCoroutineState<Self::Yield, Self::Return> {
-        trace!("item get: {}", self.state);
-
         match (&mut self.state, arg) {
             (State::Locate(c), arg) => {
                 let out = vdir_try!(c, arg);
@@ -120,7 +120,7 @@ impl VdirCoroutine for VdirItemGet {
                 let path = mem::take(path);
                 let kind = *kind;
                 let contents = map.remove(&path).unwrap_or_default();
-                VdirCoroutineState::Complete(Ok(Item {
+                VdirCoroutineState::Complete(Ok(VdirItem {
                     path,
                     kind,
                     contents,
@@ -137,7 +137,7 @@ impl VdirCoroutine for VdirItemGet {
 #[derive(Debug)]
 enum State {
     Locate(VdirItemLocate),
-    AwaitRead { path: VdirPath, kind: ItemKind },
+    AwaitRead { path: VdirPath, kind: VdirItemKind },
 }
 
 impl fmt::Display for State {
@@ -182,7 +182,7 @@ mod tests {
             state => panic!("expected Complete(Ok), got {state:?}"),
         };
         assert_eq!(item.path, vcf);
-        assert_eq!(item.kind, ItemKind::Vcard);
+        assert_eq!(item.kind, VdirItemKind::Vcard);
         assert_eq!(item.contents, b"BEGIN:VCARD");
     }
 

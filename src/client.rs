@@ -19,44 +19,58 @@ use log::trace;
 use thiserror::Error;
 
 use crate::{
-    collection::{Collection, create::*, delete::*, list::*, rename::*, update::*},
+    collection::{VdirCollection, create::*, delete::*, list::*, rename::*, update::*},
     coroutine::*,
-    item::{Item, ItemKind, copy::*, delete::*, get::*, list::*, locate::*, r#move::*, store::*},
+    item::{
+        VdirItem, VdirItemKind, copy::*, delete::*, get::*, list::*, locate::*, r#move::*, store::*,
+    },
     path::VdirPath,
 };
 
 /// Errors returned by the [`VdirClient`] helpers.
 #[derive(Debug, Error)]
 pub enum VdirClientError {
+    /// A collection create coroutine failed.
     #[error(transparent)]
     VdirCollectionCreate(#[from] VdirCollectionCreateError),
+    /// A collection delete coroutine failed.
     #[error(transparent)]
     VdirCollectionDelete(#[from] VdirCollectionDeleteError),
+    /// A collection list coroutine failed.
     #[error(transparent)]
     VdirCollectionList(#[from] VdirCollectionListError),
+    /// A collection rename coroutine failed.
     #[error(transparent)]
     VdirCollectionRename(#[from] VdirCollectionRenameError),
+    /// A collection update coroutine failed.
     #[error(transparent)]
     VdirCollectionUpdate(#[from] VdirCollectionUpdateError),
-
+    /// An item locate coroutine failed.
     #[error(transparent)]
     VdirItemLocate(#[from] VdirItemLocateError),
+    /// An item get coroutine failed.
     #[error(transparent)]
     VdirItemGet(#[from] VdirItemGetError),
+    /// An item list coroutine failed.
     #[error(transparent)]
     VdirItemList(#[from] VdirItemListError),
+    /// An item store coroutine failed.
     #[error(transparent)]
     VdirItemStore(#[from] VdirItemStoreError),
+    /// An item copy coroutine failed.
     #[error(transparent)]
     VdirItemCopy(#[from] VdirItemCopyError),
+    /// An item move coroutine failed.
     #[error(transparent)]
     VdirItemMove(#[from] VdirItemMoveError),
+    /// An item delete coroutine failed.
     #[error(transparent)]
     VdirItemDelete(#[from] VdirItemDeleteError),
-
+    /// A filesystem operation failed while servicing a coroutine
+    /// request.
     #[error(transparent)]
     Io(#[from] io::Error),
-
+    /// The system entropy source failed while minting a new item id.
     #[error("Failed to gather randomness for new item id: {0}")]
     Random(getrandom::Error),
 }
@@ -138,11 +152,9 @@ impl VdirClient {
         }
     }
 
-    // ---- Collection lifecycle ----------------------------------------
-
     /// Runs [`VdirCollectionCreate`]: creates the collection directory and
     /// writes its metadata files when present.
-    pub fn create_collection(&self, collection: Collection) -> Result<(), VdirClientError> {
+    pub fn create_collection(&self, collection: VdirCollection) -> Result<(), VdirClientError> {
         self.run(VdirCollectionCreate::new(
             collection,
             VdirCollectionCreateOptions::default(),
@@ -160,7 +172,7 @@ impl VdirClient {
 
     /// Runs [`VdirCollectionList`]: enumerates every collection directly
     /// under [`self.root`](Self::root).
-    pub fn list_collections(&self) -> Result<BTreeSet<Collection>, VdirClientError> {
+    pub fn list_collections(&self) -> Result<BTreeSet<VdirCollection>, VdirClientError> {
         self.run(VdirCollectionList::new(
             self.root.clone(),
             VdirCollectionListOptions::default(),
@@ -183,14 +195,12 @@ impl VdirClient {
 
     /// Runs [`VdirCollectionUpdate`]: atomically rewrites the metadata of
     /// `collection`.
-    pub fn update_collection(&self, collection: Collection) -> Result<(), VdirClientError> {
+    pub fn update_collection(&self, collection: VdirCollection) -> Result<(), VdirClientError> {
         self.run(VdirCollectionUpdate::new(
             collection,
             VdirCollectionUpdateOptions::default(),
         ))
     }
-
-    // ---- Items -------------------------------------------------------
 
     /// Runs [`VdirItemLocate`]: finds the on-disk path of item `id` inside
     /// `collection`.
@@ -198,7 +208,7 @@ impl VdirClient {
         &self,
         collection: impl Into<VdirPath>,
         id: impl ToString,
-    ) -> Result<(VdirPath, ItemKind), VdirClientError> {
+    ) -> Result<(VdirPath, VdirItemKind), VdirClientError> {
         let VdirItemLocateOutput { path, kind } = self.run(VdirItemLocate::new(
             collection,
             id,
@@ -213,7 +223,7 @@ impl VdirClient {
         &self,
         collection: impl Into<VdirPath>,
         id: impl ToString,
-    ) -> Result<Item, VdirClientError> {
+    ) -> Result<VdirItem, VdirClientError> {
         self.run(VdirItemGet::new(
             collection,
             id,
@@ -226,7 +236,7 @@ impl VdirClient {
     pub fn list_items(
         &self,
         collection: impl Into<VdirPath>,
-    ) -> Result<BTreeSet<Item>, VdirClientError> {
+    ) -> Result<BTreeSet<VdirItem>, VdirClientError> {
         self.run(VdirItemList::new(
             collection,
             VdirItemListOptions::default(),
@@ -243,7 +253,7 @@ impl VdirClient {
         &self,
         collection: impl Into<VdirPath>,
         id: Option<String>,
-        kind: ItemKind,
+        kind: VdirItemKind,
         contents: Vec<u8>,
     ) -> Result<(String, VdirPath), VdirClientError> {
         let VdirItemStoreOutput { id, path } = self.run(VdirItemStore::new(
@@ -300,16 +310,12 @@ impl VdirClient {
     }
 }
 
-// ---- Path normalization -----------------------------------------
-
 fn normalize_path(path: std::path::PathBuf) -> VdirPath {
     let s = path.to_string_lossy().into_owned();
     #[cfg(windows)]
     let s = s.replace('\\', "/");
     VdirPath::new(s)
 }
-
-// ---- Filesystem helpers -----------------------------------------
 
 fn create_dirs(paths: BTreeSet<VdirPath>) -> Result<(), io::Error> {
     for path in paths {

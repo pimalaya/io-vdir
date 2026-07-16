@@ -1,37 +1,23 @@
 # Contributing guide
 
-Thank you for investing your time in contributing to the I/O Vdir project.
+Thank you for investing your time in contributing to I/O Vdir.
 
-## Development
+Whether you are a human or an AI agent, read these in order before touching the code:
 
-The development environment is managed by [Nix](https://nixos.org/download.html).
-Running `nix-shell` will spawn a shell with everything you need to get started with the project.
+1. the [Pimalaya README](https://github.com/pimalaya) for what the project is and how its repositories stack;
+2. the [Pimalaya CONTRIBUTING](https://github.com/pimalaya/.github/blob/master/CONTRIBUTING.md) guide, which chains to the shared architecture and guidelines;
+3. the inline header documentation, starting with src/lib.rs: it is the architecture document of this crate;
+4. the docs/ folder for the development history and living plans.
 
-If you do not want to use Nix, you can either use [rustup](https://rust-lang.github.io/rustup/index.html):
+Everything below documents only what differs from the Pimalaya standards.
 
-```text
-rustup update
+## Feature matrix
+
+I/O Vdir ships no network or TLS layer, so the shared three-layer build model does not apply. On top of the I/O-free coroutines it exposes three independent features: client (the blocking client over the local filesystem), parser (calcard-backed contact and calendar decoding) and serde. Check that the coroutine core stays free of the gated code:
+
+```sh
+cargo build --no-default-features                          # coroutines only, no std leak
+cargo build --no-default-features --features client        # blocking filesystem client
+cargo build --no-default-features --features parser,serde  # decoding and (de)serialization
+cargo build                                                # every feature (default)
 ```
-
-or install manually the following dependencies:
-
-- [cargo](https://doc.rust-lang.org/cargo/)
-- [rustc](https://doc.rust-lang.org/stable/rustc/platform-support.html)
-
-## Build
-
-```
-cargo build
-```
-
-You can disable default [features](https://doc.rust-lang.org/cargo/reference/features.html) with `--no-default-features` and enable features with `--features feat1,feat2,feat3`.
-
-Finally, you can build a release with `--release`:
-
-```
-cargo build --no-default-features --release
-```
-
-## Commit style
-
-I/O Vdir follows the [conventional commits specification](https://www.conventionalcommits.org/en/v1.0.0/#summary).

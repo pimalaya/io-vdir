@@ -58,13 +58,15 @@ use thiserror::Error;
 
 use crate::{
     coroutine::*,
-    item::{Item, ItemKind},
+    item::{VdirItem, VdirItemKind},
     path::VdirPath,
 };
 
 /// Failure causes during a [`VdirItemList`] step.
 #[derive(Clone, Debug, Error)]
 pub enum VdirItemListError {
+    /// The driver fed back a reply that does not match the pending
+    /// request.
     #[error("Vdir item list failed: unexpected arg {0:?}")]
     UnexpectedArg(Option<VdirReply>),
 }
@@ -94,11 +96,9 @@ impl VdirItemList {
 
 impl VdirCoroutine for VdirItemList {
     type Yield = VdirYield;
-    type Return = Result<BTreeSet<Item>, VdirItemListError>;
+    type Return = Result<BTreeSet<VdirItem>, VdirItemListError>;
 
     fn resume(&mut self, arg: Option<VdirReply>) -> VdirCoroutineState<Self::Yield, Self::Return> {
-        trace!("item list: {}", self.state);
-
         match (&mut self.state, arg) {
             (State::Start(collection), None) => {
                 let paths = BTreeSet::from_iter([mem::take(collection)]);
@@ -106,7 +106,7 @@ impl VdirCoroutine for VdirItemList {
                 VdirCoroutineState::Yielded(VdirYield::WantsDirRead(paths))
             }
             (State::AwaitDirRead, Some(VdirReply::DirRead(entries))) => {
-                let mut kinds: BTreeMap<VdirPath, ItemKind> = BTreeMap::new();
+                let mut kinds: BTreeMap<VdirPath, VdirItemKind> = BTreeMap::new();
 
                 for paths in entries.into_values() {
                     for path in paths {
@@ -118,7 +118,7 @@ impl VdirCoroutine for VdirItemList {
                             continue;
                         };
 
-                        let Some(kind) = ItemKind::from_extension(ext) else {
+                        let Some(kind) = VdirItemKind::from_extension(ext) else {
                             continue;
                         };
 
@@ -139,7 +139,7 @@ impl VdirCoroutine for VdirItemList {
 
                 for (path, kind) in mem::take(kinds) {
                     let bytes = contents.remove(&path).unwrap_or_default();
-                    items.insert(Item {
+                    items.insert(VdirItem {
                         path,
                         kind,
                         contents: bytes,
@@ -161,7 +161,9 @@ impl VdirCoroutine for VdirItemList {
 enum State {
     Start(VdirPath),
     AwaitDirRead,
-    AwaitFileRead { kinds: BTreeMap<VdirPath, ItemKind> },
+    AwaitFileRead {
+        kinds: BTreeMap<VdirPath, VdirItemKind>,
+    },
 }
 
 impl fmt::Display for State {
@@ -210,7 +212,7 @@ mod tests {
             state => panic!("expected Complete(Ok), got {state:?}"),
         };
         assert_eq!(items.len(), 1);
-        assert_eq!(items.iter().next().unwrap().kind, ItemKind::Vcard);
+        assert_eq!(items.iter().next().unwrap().kind, VdirItemKind::Vcard);
     }
 
     #[test]
@@ -238,8 +240,6 @@ mod tests {
         };
         assert!(matches!(err, VdirItemListError::UnexpectedArg(_)));
     }
-
-    // --- utils
 
     fn expect_wants_dir_read(cor: &mut VdirItemList) -> BTreeSet<VdirPath> {
         match cor.resume(None) {

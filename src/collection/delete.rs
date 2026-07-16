@@ -30,7 +30,6 @@ use core::{fmt, mem};
 
 use alloc::collections::BTreeSet;
 
-use log::trace;
 use thiserror::Error;
 
 use crate::{coroutine::*, path::VdirPath};
@@ -38,6 +37,8 @@ use crate::{coroutine::*, path::VdirPath};
 /// Failure causes during a [`VdirCollectionDelete`] step.
 #[derive(Clone, Debug, Error)]
 pub enum VdirCollectionDeleteError {
+    /// The driver fed back a reply that does not match the pending
+    /// request.
     #[error("Vdir collection delete failed: unexpected arg {0:?}")]
     UnexpectedArg(Option<VdirReply>),
 }
@@ -71,8 +72,6 @@ impl VdirCoroutine for VdirCollectionDelete {
     type Return = Result<(), VdirCollectionDeleteError>;
 
     fn resume(&mut self, arg: Option<VdirReply>) -> VdirCoroutineState<Self::Yield, Self::Return> {
-        trace!("collection delete: {}", self.state);
-
         match (&mut self.state, arg) {
             (State::Start { paths }, None) => {
                 let paths = mem::take(paths);

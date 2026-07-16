@@ -12,11 +12,11 @@
 //! ```rust,no_run
 //! use std::fs;
 //!
-//! use io_vdir::{coroutine::*, item::{store::*, ItemKind}};
+//! use io_vdir::{coroutine::*, item::{store::*, VdirItemKind}};
 //!
 //! let bytes = b"BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Alice\r\nEND:VCARD\r\n".to_vec();
 //! let opts = VdirItemStoreOptions::default();
-//! let mut coroutine = VdirItemStore::new("/tmp/vdir/contacts", None, ItemKind::Vcard, bytes, opts);
+//! let mut coroutine = VdirItemStore::new("/tmp/vdir/contacts", None, VdirItemKind::Vcard, bytes, opts);
 //! let mut arg = None;
 //!
 //! let out = loop {
@@ -50,12 +50,11 @@ use core::{fmt, mem};
 
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
 
-use log::trace;
 use thiserror::Error;
 
 use crate::{
     coroutine::*,
-    item::{ItemKind, TMP},
+    item::{TMP, VdirItemKind},
     path::VdirPath,
 };
 
@@ -65,6 +64,8 @@ const UUID_LEN: usize = 16;
 /// Failure causes during a [`VdirItemStore`] step.
 #[derive(Clone, Debug, Error)]
 pub enum VdirItemStoreError {
+    /// The driver fed back a reply that does not match the pending
+    /// request.
     #[error("Vdir item store failed: unexpected arg {0:?}")]
     UnexpectedArg(Option<VdirReply>),
 }
@@ -72,7 +73,10 @@ pub enum VdirItemStoreError {
 /// Successful output of [`VdirItemStore`].
 #[derive(Clone, Debug)]
 pub struct VdirItemStoreOutput {
+    /// Id of the stored item, reused from the caller or freshly
+    /// minted as a UUIDv4.
     pub id: String,
+    /// Final on-disk path of the stored item file.
     pub path: VdirPath,
 }
 
@@ -98,7 +102,7 @@ impl VdirItemStore {
     pub fn new(
         collection: impl Into<VdirPath>,
         id: Option<String>,
-        kind: ItemKind,
+        kind: VdirItemKind,
         contents: Vec<u8>,
         opts: VdirItemStoreOptions,
     ) -> Self {
@@ -119,8 +123,6 @@ impl VdirCoroutine for VdirItemStore {
     type Return = Result<VdirItemStoreOutput, VdirItemStoreError>;
 
     fn resume(&mut self, arg: Option<VdirReply>) -> VdirCoroutineState<Self::Yield, Self::Return> {
-        trace!("item store: {}", self.state);
-
         match (&mut self.state, arg) {
             (
                 State::Start {
@@ -214,12 +216,12 @@ enum State {
     Start {
         collection: VdirPath,
         id: Option<String>,
-        kind: ItemKind,
+        kind: VdirItemKind,
         contents: Vec<u8>,
     },
     AwaitRandom {
         collection: VdirPath,
-        kind: ItemKind,
+        kind: VdirItemKind,
         contents: Vec<u8>,
     },
     AwaitFileCreate {
@@ -246,7 +248,7 @@ impl fmt::Display for State {
 
 /// Builds the `(tmp, final)` paths for item `id` of `kind` under
 /// `collection`.
-fn build_paths(collection: &VdirPath, id: &str, kind: ItemKind) -> (VdirPath, VdirPath) {
+fn build_paths(collection: &VdirPath, id: &str, kind: VdirItemKind) -> (VdirPath, VdirPath) {
     let ext = kind.extension();
     let final_path = collection.join(&format!("{id}.{ext}"));
     let tmp_path = collection.join(&format!("{id}.{ext}.{TMP}"));
@@ -300,7 +302,7 @@ mod tests {
         let mut cor = VdirItemStore::new(
             "root/contacts",
             Some("alice".into()),
-            ItemKind::Vcard,
+            VdirItemKind::Vcard,
             b"BEGIN:VCARD".to_vec(),
             VdirItemStoreOptions::default(),
         );
@@ -334,7 +336,7 @@ mod tests {
         let mut cor = VdirItemStore::new(
             "root/contacts",
             None,
-            ItemKind::Ical,
+            VdirItemKind::Ical,
             b"BEGIN:VCAL".to_vec(),
             VdirItemStoreOptions::default(),
         );
@@ -366,7 +368,7 @@ mod tests {
         let mut cor = VdirItemStore::new(
             "root/contacts",
             Some("alice".into()),
-            ItemKind::Vcard,
+            VdirItemKind::Vcard,
             b"x".to_vec(),
             VdirItemStoreOptions::default(),
         );

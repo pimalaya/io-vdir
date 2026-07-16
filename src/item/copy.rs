@@ -43,7 +43,6 @@ use core::fmt;
 
 use alloc::string::{String, ToString};
 
-use log::trace;
 use thiserror::Error;
 
 use crate::{coroutine::*, item::locate::*, path::VdirPath, vdir_try};
@@ -51,9 +50,12 @@ use crate::{coroutine::*, item::locate::*, path::VdirPath, vdir_try};
 /// Failure causes during a [`VdirItemCopy`] step.
 #[derive(Clone, Debug, Error)]
 pub enum VdirItemCopyError {
+    /// The driver fed back a reply that does not match the pending
+    /// request.
     #[error("Vdir item copy failed: unexpected arg {0:?}")]
     UnexpectedArg(Option<VdirReply>),
 
+    /// The inner locate coroutine failed.
     #[error(transparent)]
     Locate(#[from] VdirItemLocateError),
 }
@@ -98,8 +100,6 @@ impl VdirCoroutine for VdirItemCopy {
     type Return = Result<(), VdirItemCopyError>;
 
     fn resume(&mut self, arg: Option<VdirReply>) -> VdirCoroutineState<Self::Yield, Self::Return> {
-        trace!("item copy: {}", self.state);
-
         match (&mut self.state, arg) {
             (State::Locate { target, id, inner }, arg) => {
                 let out = vdir_try!(inner, arg);

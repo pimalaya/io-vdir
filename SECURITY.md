@@ -1,7 +1,13 @@
-# Security Policy
+# Security policy
 
-## Reporting a Vulnerability
+## Supported versions
 
-Feel free to open a public issue here if you found a security vulnerability.
+| Version | Supported          |
+|---------|--------------------|
+| 0.0.x   | :white_check_mark: |
 
-If, for whatever reason, you prefer to not make it public, please write an email to <clement.douin@posteo.net>.
+## Reporting a vulnerability
+
+Open a public issue on the [issue tracker](https://github.com/pimalaya/io-vdir/issues) if you found a security vulnerability.
+
+If, for whatever reason, you prefer not to make it public, write an email to pimalaya.org@posteo.net instead.

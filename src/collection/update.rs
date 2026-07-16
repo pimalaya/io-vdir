@@ -10,11 +10,11 @@
 //! use std::fs;
 //!
 //! use io_vdir::{
-//!     collection::{Collection, update::*},
+//!     collection::{VdirCollection, update::*},
 //!     coroutine::*,
 //! };
 //!
-//! let mut collection = Collection::from_path("/tmp/vdir/contacts");
+//! let mut collection = VdirCollection::from_path("/tmp/vdir/contacts");
 //! collection.display_name = Some("Contacts".into());
 //! let opts = VdirCollectionUpdateOptions::default();
 //! let mut coroutine = VdirCollectionUpdate::new(collection, opts);
@@ -45,11 +45,10 @@ use core::{fmt, mem};
 
 use alloc::{collections::BTreeMap, vec::Vec};
 
-use log::trace;
 use thiserror::Error;
 
 use crate::{
-    collection::{COLOR, Collection, DESCRIPTION, DISPLAYNAME},
+    collection::{COLOR, DESCRIPTION, DISPLAYNAME, VdirCollection},
     coroutine::*,
     item::TMP,
     path::VdirPath,
@@ -58,6 +57,8 @@ use crate::{
 /// Failure causes during a [`VdirCollectionUpdate`] step.
 #[derive(Clone, Debug, Error)]
 pub enum VdirCollectionUpdateError {
+    /// The driver fed back a reply that does not match the pending
+    /// request.
     #[error("Vdir collection update failed: unexpected arg {0:?}")]
     UnexpectedArg(Option<VdirReply>),
 }
@@ -77,7 +78,7 @@ pub struct VdirCollectionUpdate {
 impl VdirCollectionUpdate {
     /// Creates a new coroutine that will write the metadata of
     /// `collection` to disk.
-    pub fn new(collection: Collection, opts: VdirCollectionUpdateOptions) -> Self {
+    pub fn new(collection: VdirCollection, opts: VdirCollectionUpdateOptions) -> Self {
         Self {
             opts,
             state: State::Start(collection),
@@ -90,8 +91,6 @@ impl VdirCoroutine for VdirCollectionUpdate {
     type Return = Result<(), VdirCollectionUpdateError>;
 
     fn resume(&mut self, arg: Option<VdirReply>) -> VdirCoroutineState<Self::Yield, Self::Return> {
-        trace!("collection update: {}", self.state);
-
         match (&mut self.state, arg) {
             (State::Start(collection), None) => {
                 let collection = mem::take(collection);
@@ -142,7 +141,7 @@ impl VdirCoroutine for VdirCollectionUpdate {
 
 #[derive(Debug)]
 enum State {
-    Start(Collection),
+    Start(VdirCollection),
     AwaitFileCreate { renames: Vec<(VdirPath, VdirPath)> },
     AwaitRename,
 }
@@ -163,7 +162,7 @@ mod tests {
 
     #[test]
     fn writes_temp_files_then_renames() {
-        let collection = Collection {
+        let collection = VdirCollection {
             path: VdirPath::from("root/contacts"),
             display_name: Some("Contacts".into()),
             description: None,
@@ -196,7 +195,7 @@ mod tests {
     #[test]
     fn no_metadata_completes_immediately() {
         let mut cor = VdirCollectionUpdate::new(
-            Collection::from_path("root/contacts"),
+            VdirCollection::from_path("root/contacts"),
             VdirCollectionUpdateOptions::default(),
         );
 
@@ -208,7 +207,7 @@ mod tests {
 
     #[test]
     fn unexpected_reply_returns_error() {
-        let collection = Collection {
+        let collection = VdirCollection {
             path: VdirPath::from("root/contacts"),
             display_name: Some("Contacts".into()),
             description: None,

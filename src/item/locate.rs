@@ -42,21 +42,23 @@ use alloc::{
     string::{String, ToString},
 };
 
-use log::trace;
 use thiserror::Error;
 
 use crate::{
     coroutine::*,
-    item::{ICS, ItemKind, VCF},
+    item::{ICS, VCF, VdirItemKind},
     path::VdirPath,
 };
 
 /// Failure causes during a [`VdirItemLocate`] step.
 #[derive(Clone, Debug, Error)]
 pub enum VdirItemLocateError {
+    /// The driver fed back a reply that does not match the pending
+    /// request.
     #[error("Vdir item locate failed: unexpected arg {0:?}")]
     UnexpectedArg(Option<VdirReply>),
 
+    /// No item with the given id exists in the collection.
     #[error("Vdir item locate failed: item {0} not found")]
     NotFound(String),
 }
@@ -64,8 +66,10 @@ pub enum VdirItemLocateError {
 /// Successful output of [`VdirItemLocate`].
 #[derive(Clone, Debug)]
 pub struct VdirItemLocateOutput {
+    /// On-disk path of the located item file.
     pub path: VdirPath,
-    pub kind: ItemKind,
+    /// Kind of the located item, derived from its extension.
+    pub kind: VdirItemKind,
 }
 
 /// Options for [`VdirItemLocate::new`].
@@ -103,8 +107,6 @@ impl VdirCoroutine for VdirItemLocate {
     type Return = Result<VdirItemLocateOutput, VdirItemLocateError>;
 
     fn resume(&mut self, arg: Option<VdirReply>) -> VdirCoroutineState<Self::Yield, Self::Return> {
-        trace!("item locate: {}", self.state);
-
         match (&mut self.state, arg) {
             (State::Start { collection, id }, None) => {
                 let id = mem::take(id);
@@ -130,7 +132,7 @@ impl VdirCoroutine for VdirItemLocate {
                 if probes.get(vcf_path).copied().unwrap_or(false) {
                     let out = VdirItemLocateOutput {
                         path: mem::take(vcf_path),
-                        kind: ItemKind::Vcard,
+                        kind: VdirItemKind::Vcard,
                     };
                     return VdirCoroutineState::Complete(Ok(out));
                 }
@@ -138,7 +140,7 @@ impl VdirCoroutine for VdirItemLocate {
                 if probes.get(ics_path).copied().unwrap_or(false) {
                     let out = VdirItemLocateOutput {
                         path: mem::take(ics_path),
-                        kind: ItemKind::Ical,
+                        kind: VdirItemKind::Ical,
                     };
                     return VdirCoroutineState::Complete(Ok(out));
                 }
@@ -198,7 +200,7 @@ mod tests {
         map.insert(ics, false);
         let out = expect_complete_ok(&mut cor, Some(VdirReply::FileExists(map)));
         assert_eq!(out.path, vcf);
-        assert_eq!(out.kind, ItemKind::Vcard);
+        assert_eq!(out.kind, VdirItemKind::Vcard);
     }
 
     #[test]
@@ -223,8 +225,6 @@ mod tests {
         let err = expect_complete_err(&mut cor, Some(VdirReply::DirCreate));
         assert!(matches!(err, VdirItemLocateError::UnexpectedArg(_)));
     }
-
-    // --- utils
 
     fn expect_wants_file_exists(cor: &mut VdirItemLocate) -> BTreeSet<VdirPath> {
         match cor.resume(None) {
