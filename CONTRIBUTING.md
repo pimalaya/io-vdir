@@ -13,11 +13,11 @@ Everything below documents only what differs from the Pimalaya standards.
 
 ## Feature matrix
 
-I/O Vdir ships no network or TLS layer, so the shared three-layer build model does not apply. On top of the I/O-free coroutines it exposes three independent features: client (the blocking client over the local filesystem), parser (calcard-backed contact and calendar decoding) and serde. Check that the coroutine core stays free of the gated code:
+I/O Vdir ships no network or TLS layer, so the shared three-layer build model does not apply. It never parses item bytes either, leaving vCard and iCalendar decoding to the consumer. On top of the I/O-free coroutines it exposes two independent features: client (the blocking client over the local filesystem) and serde. Check that the coroutine core stays free of the gated code:
 
 ```sh
-cargo build --no-default-features                          # coroutines only, no std leak
-cargo build --no-default-features --features client        # blocking filesystem client
-cargo build --no-default-features --features parser,serde  # decoding and (de)serialization
-cargo build                                                # every feature (default)
+cargo build --no-default-features                    # coroutines only, no std leak
+cargo build --no-default-features --features client  # blocking filesystem client
+cargo build --no-default-features --features serde   # (de)serialization of the handles
+cargo build                                          # every feature (default)
 ```

@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] - 2026-07-16
 
 ### Changed
 
@@ -26,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Realigned every documentation and metadata file with the Pimalaya guidelines: the README dropped all code and now redirects to docs.rs, the lib.rs header replaced the README include as the crate architecture document, and the CONTRIBUTING guide keeps only the repository-specific feature matrix.
 
 ### Removed
+
+- Removed the `parser` feature, the calcard dependency and the `VdirItem::as_vcard` / `as_ical` helpers. io-vdir no longer decodes item bytes; consumers run the vCard or iCalendar parser of their choice (for example vcard-rs and ical-rs) on `VdirItem::contents`.
 
 - Removed the dependency on io-fs and the standalone `constants` module; per-domain constants now live next to the types that consume them.
 
@@ -55,6 +57,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improve inline documentation
 - Release v0.0.1
 
-[unreleased]: https://github.com/pimalaya/io-vdir/compare/v0.0.2..HEAD
+[0.1.0]: https://github.com/pimalaya/io-vdir/compare/v0.0.3..v0.1.0
 [0.0.2]: https://github.com/pimalaya/io-vdir/compare/v0.0.1..v0.0.2
 [0.0.1]: https://github.com/pimalaya/io-vdir/compare/root..v0.0.1

@@ -25,14 +25,13 @@ This library is composed of 2 feature-gated layers:
 - **Standard client**: an optional blocking client that runs every operation against the local filesystem for you.
 - **Collections**: create, delete, list, rename and update collection directories, including the optional display name, description and color metadata markers.
 - **Items**: store, get, list, locate, copy, move and delete contact and calendar files, written atomically through a temporary file and a rename.
-- **Optional parsing**: decode item bytes into contact or calendar values on demand.
 
 > [!TIP]
 > Each layer is toggled through a cargo feature; the default set is listed in [Cargo.toml](./Cargo.toml) and on [docs.rs](https://docs.rs/crate/io-vdir/latest/features).
 
 ## Specification coverage
 
-The library implements the [Vdir storage format](https://vdirsyncer.pimutils.org/en/stable/vdir.html): collections are directories, items are files inside them, and metadata lives in a small set of marker files. Items are either contacts ([vCard](https://www.rfc-editor.org/rfc/rfc6350)) or calendar objects ([iCalendar](https://www.rfc-editor.org/rfc/rfc5545)); the core treats them as opaque bytes and the optional parser decodes them.
+The library implements the [Vdir storage format](https://vdirsyncer.pimutils.org/en/stable/vdir.html): collections are directories, items are files inside them, and metadata lives in a small set of marker files. Items are either contacts ([vCard](https://www.rfc-editor.org/rfc/rfc6350)) or calendar objects ([iCalendar](https://www.rfc-editor.org/rfc/rfc5545)); io-vdir treats them as opaque bytes and leaves parsing to the consumer.
 
 ## Usage
 

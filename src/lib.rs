@@ -32,13 +32,11 @@
 //!
 //! ## Encoding
 //!
-//! Items are opaque bytes at the coroutine level; the optional
-//! `parser` feature decodes them into [calcard] vCard or iCalendar
-//! values, and the `serde` feature derives (de)serialization on the
-//! public handles.
+//! Items are opaque bytes at every level: io-vdir never parses them,
+//! leaving the choice of vCard or iCalendar parser to the caller. The
+//! `serde` feature derives (de)serialization on the public handles.
 //!
 //! [vdir]: https://vdirsyncer.pimutils.org/en/stable/vdir.html
-//! [calcard]: https://docs.rs/calcard
 
 #[macro_use]
 extern crate alloc;

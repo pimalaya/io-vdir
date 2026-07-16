@@ -12,13 +12,8 @@
 //! [vdir specification]: https://vdirsyncer.pimutils.org/en/stable/vdir.html
 
 use core::hash::{Hash, Hasher};
-#[cfg(feature = "parser")]
-use core::str::from_utf8;
 
 use alloc::vec::Vec;
-
-#[cfg(feature = "parser")]
-use calcard::{icalendar::ICalendar, vcard::VCard};
 
 use crate::path::VdirPath;
 
@@ -75,9 +70,9 @@ impl VdirItemKind {
 /// A Vdir collection's item.
 ///
 /// Carries the on-disk path, the parsed kind (from the file
-/// extension) and the raw file bytes. Bytes stay un-decoded at this
-/// level; the optional `parser` feature exposes calcard-backed
-/// helpers on top.
+/// extension) and the raw file bytes. The bytes stay raw: io-vdir
+/// never decodes them, leaving the choice of vCard or iCalendar
+/// parser to the caller.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct VdirItem {
@@ -104,28 +99,6 @@ impl VdirItem {
     /// Returns the item bytes.
     pub fn contents(&self) -> &[u8] {
         &self.contents
-    }
-
-    /// Parses the bytes as an iCalendar, when the item kind is
-    /// [`VdirItemKind::Ical`].
-    #[cfg(feature = "parser")]
-    pub fn as_ical(&self) -> Option<ICalendar> {
-        if !matches!(self.kind, VdirItemKind::Ical) {
-            return None;
-        }
-        let contents = from_utf8(&self.contents).ok()?;
-        ICalendar::parse(contents).ok()
-    }
-
-    /// Parses the bytes as a vCard, when the item kind is
-    /// [`VdirItemKind::Vcard`].
-    #[cfg(feature = "parser")]
-    pub fn as_vcard(&self) -> Option<VCard> {
-        if !matches!(self.kind, VdirItemKind::Vcard) {
-            return None;
-        }
-        let contents = from_utf8(&self.contents).ok()?;
-        VCard::parse(contents).ok()
     }
 }
 

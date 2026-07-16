@@ -20,4 +20,4 @@ Paths are a forward-slash `path::VdirPath` newtype used on every platform; `std:
 
 ## Encoding
 
-Items are opaque bytes at the coroutine level. The `parser` feature decodes them into [calcard](https://docs.rs/calcard) vCard or iCalendar values on demand, and the `serde` feature derives (de)serialization on the public handles. Both are optional so the core stays dependency-light.
+Items are opaque bytes at every level: io-vdir never parses them, so consumers pick whichever vCard or iCalendar parser they want (for example the in-house vcard-rs and ical-rs) and run it on the item contents. The optional `serde` feature derives (de)serialization on the public handles.
