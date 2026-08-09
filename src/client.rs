@@ -336,7 +336,15 @@ fn remove_dirs(paths: BTreeSet<VdirPath>) -> Result<(), io::Error> {
 fn remove_files(paths: BTreeSet<VdirPath>) -> Result<(), io::Error> {
     for path in paths {
         trace!("remove_file {path}");
-        fs::remove_file(path.as_str())?;
+
+        // NOTE: removal is idempotent. A coroutine asks for the state it
+        // wants, and "this file should not exist" is already true when the
+        // file was never written, which is the common case for a collection
+        // that never carried a description.
+        match fs::remove_file(path.as_str()) {
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            result => result?,
+        }
     }
     Ok(())
 }

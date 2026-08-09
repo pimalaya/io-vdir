@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `VdirCollectionUpdate` writes the collection it is handed rather than only its non-empty fields: a present value is written as before, and an absent or empty one has its metadata file removed. The coroutine takes a whole `VdirCollection`, a desired state rather than a patch, so this is what its signature already promised; before it, clearing a description was a silent no-op that reported success and left the file on disk.
+
+  **Breaking**: a caller passing a partially-filled collection used to keep the fields it left unset and now clears them. Read the collection, apply your change to it, and pass the result.
+
+- The std client's file removal is idempotent: removing a path that does not exist is a success, since a coroutine asking for a file to be gone is satisfied by its absence.
+
 ## [0.1.0] - 2026-07-16
 
 ### Changed

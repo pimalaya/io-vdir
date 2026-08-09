@@ -43,7 +43,12 @@
 
 use core::{fmt, mem};
 
-use alloc::{collections::BTreeMap, vec::Vec};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    format,
+    string::String,
+    vec::Vec,
+};
 
 use thiserror::Error;
 
@@ -96,41 +101,56 @@ impl VdirCoroutine for VdirCollectionUpdate {
                 let collection = mem::take(collection);
                 let mut files = BTreeMap::new();
                 let mut renames = Vec::new();
+                let mut removals = BTreeSet::new();
 
-                if let Some(name) = collection.display_name.filter(|s| !s.is_empty()) {
-                    let final_path = collection.path.join(DISPLAYNAME);
-                    let tmp_path = final_path.with_file_name(&format!("{DISPLAYNAME}.{TMP}"));
-                    files.insert(tmp_path.clone(), name.into_bytes());
-                    renames.push((tmp_path, final_path));
-                }
+                // NOTE: the collection is a desired state, not a patch, so a
+                // field it does not carry is one the collection should not
+                // have: its file goes. Writing only what is set would leave a
+                // cleared description on disk and report success.
+                let mut field = |name: &str, value: Option<String>| {
+                    let final_path = collection.path.join(name);
+                    match value.filter(|value| !value.is_empty()) {
+                        Some(value) => {
+                            let tmp_path = final_path.with_file_name(&format!("{name}.{TMP}"));
+                            files.insert(tmp_path.clone(), value.into_bytes());
+                            renames.push((tmp_path, final_path));
+                        }
+                        None => {
+                            removals.insert(final_path);
+                        }
+                    }
+                };
 
-                if let Some(desc) = collection.description.filter(|s| !s.is_empty()) {
-                    let final_path = collection.path.join(DESCRIPTION);
-                    let tmp_path = final_path.with_file_name(&format!("{DESCRIPTION}.{TMP}"));
-                    files.insert(tmp_path.clone(), desc.into_bytes());
-                    renames.push((tmp_path, final_path));
-                }
-
-                if let Some(color) = collection.color.filter(|s| !s.is_empty()) {
-                    let final_path = collection.path.join(COLOR);
-                    let tmp_path = final_path.with_file_name(&format!("{COLOR}.{TMP}"));
-                    files.insert(tmp_path.clone(), color.into_bytes());
-                    renames.push((tmp_path, final_path));
-                }
+                field(DISPLAYNAME, collection.display_name.clone());
+                field(DESCRIPTION, collection.description.clone());
+                field(COLOR, collection.color.clone());
 
                 if files.is_empty() {
+                    self.state = State::AwaitFileRemove;
+                    return VdirCoroutineState::Yielded(VdirYield::WantsFileRemove(removals));
+                }
+
+                self.state = State::AwaitFileCreate { renames, removals };
+                VdirCoroutineState::Yielded(VdirYield::WantsFileCreate(files))
+            }
+            (State::AwaitFileCreate { renames, removals }, Some(VdirReply::FileCreate)) => {
+                let renames = mem::take(renames);
+                let removals = mem::take(removals);
+                self.state = State::AwaitRename { removals };
+                VdirCoroutineState::Yielded(VdirYield::WantsRename(renames))
+            }
+            (State::AwaitRename { removals }, Some(VdirReply::Rename)) => {
+                let removals = mem::take(removals);
+                if removals.is_empty() {
                     return VdirCoroutineState::Complete(Ok(()));
                 }
 
-                self.state = State::AwaitFileCreate { renames };
-                VdirCoroutineState::Yielded(VdirYield::WantsFileCreate(files))
+                self.state = State::AwaitFileRemove;
+                VdirCoroutineState::Yielded(VdirYield::WantsFileRemove(removals))
             }
-            (State::AwaitFileCreate { renames }, Some(VdirReply::FileCreate)) => {
-                let renames = mem::take(renames);
-                self.state = State::AwaitRename;
-                VdirCoroutineState::Yielded(VdirYield::WantsRename(renames))
+            (State::AwaitFileRemove, Some(VdirReply::FileRemove)) => {
+                VdirCoroutineState::Complete(Ok(()))
             }
-            (State::AwaitRename, Some(VdirReply::Rename)) => VdirCoroutineState::Complete(Ok(())),
             (_, arg) => {
                 let err = VdirCollectionUpdateError::UnexpectedArg(arg);
                 VdirCoroutineState::Complete(Err(err))
@@ -142,8 +162,14 @@ impl VdirCoroutine for VdirCollectionUpdate {
 #[derive(Debug)]
 enum State {
     Start(VdirCollection),
-    AwaitFileCreate { renames: Vec<(VdirPath, VdirPath)> },
-    AwaitRename,
+    AwaitFileCreate {
+        renames: Vec<(VdirPath, VdirPath)>,
+        removals: BTreeSet<VdirPath>,
+    },
+    AwaitRename {
+        removals: BTreeSet<VdirPath>,
+    },
+    AwaitFileRemove,
 }
 
 impl fmt::Display for State {
@@ -151,7 +177,8 @@ impl fmt::Display for State {
         match self {
             Self::Start(_) => f.write_str("start"),
             Self::AwaitFileCreate { .. } => f.write_str("await file create reply"),
-            Self::AwaitRename => f.write_str("await rename reply"),
+            Self::AwaitRename { .. } => f.write_str("await rename reply"),
+            Self::AwaitFileRemove => f.write_str("await file remove reply"),
         }
     }
 }
@@ -186,20 +213,38 @@ mod tests {
             vec![(tmp, VdirPath::from("root/contacts/displayname"))]
         );
 
-        match cor.resume(Some(VdirReply::Rename)) {
+        // NOTE: the two fields the collection does not carry are cleared,
+        // so their files are removed after the rename.
+        let removals = match cor.resume(Some(VdirReply::Rename)) {
+            VdirCoroutineState::Yielded(VdirYield::WantsFileRemove(removals)) => removals,
+            state => panic!("expected WantsFileRemove, got {state:?}"),
+        };
+        assert!(removals.contains(&VdirPath::from("root/contacts/description")));
+        assert!(removals.contains(&VdirPath::from("root/contacts/color")));
+        assert!(!removals.contains(&VdirPath::from("root/contacts/displayname")));
+
+        match cor.resume(Some(VdirReply::FileRemove)) {
             VdirCoroutineState::Complete(Ok(())) => {}
             state => panic!("expected Complete(Ok), got {state:?}"),
         }
     }
 
     #[test]
-    fn no_metadata_completes_immediately() {
+    fn no_metadata_removes_every_file() {
         let mut cor = VdirCollectionUpdate::new(
             VdirCollection::from_path("root/contacts"),
             VdirCollectionUpdateOptions::default(),
         );
 
-        match cor.resume(None) {
+        // NOTE: a collection carrying no metadata at all asks for nothing to
+        // be written and for all three files to go.
+        let removals = match cor.resume(None) {
+            VdirCoroutineState::Yielded(VdirYield::WantsFileRemove(removals)) => removals,
+            state => panic!("expected WantsFileRemove, got {state:?}"),
+        };
+        assert_eq!(removals.len(), 3);
+
+        match cor.resume(Some(VdirReply::FileRemove)) {
             VdirCoroutineState::Complete(Ok(())) => {}
             state => panic!("expected Complete(Ok), got {state:?}"),
         }
