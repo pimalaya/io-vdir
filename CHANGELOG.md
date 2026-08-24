@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-24
+
 ### Changed
 
 - `VdirCollectionUpdate` writes the collection it is handed rather than only its non-empty fields: a present value is written as before, and an absent or empty one has its metadata file removed. The coroutine takes a whole `VdirCollection`, a desired state rather than a patch, so this is what its signature already promised; before it, clearing a description was a silent no-op that reported success and left the file on disk.
@@ -77,6 +79,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improve inline documentation
 - Release v0.0.1
 
+[unreleased]: https://github.com/pimalaya/io-vdir/compare/v0.2.0..HEAD
+[0.2.0]: https://github.com/pimalaya/io-vdir/compare/v0.1.0..v0.2.0
 [0.1.0]: https://github.com/pimalaya/io-vdir/compare/v0.0.3..v0.1.0
 [0.0.2]: https://github.com/pimalaya/io-vdir/compare/v0.0.1..v0.0.2
 [0.0.1]: https://github.com/pimalaya/io-vdir/compare/root..v0.0.1
