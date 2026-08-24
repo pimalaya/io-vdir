@@ -3,6 +3,14 @@
 //! Locates the source item via [`VdirItemLocate`], then copies it into the
 //! target collection keeping the same id and extension.
 //!
+//! The bytes land on the target's `.tmp` sibling and one rename
+//! publishes them, as [`VdirItemStore`] writes its own. Keeping the id
+//! means the target name may already hold an item, and staging is what
+//! keeps that item whole until the copy is complete: it is replaced in
+//! one step or not at all.
+//!
+//! [`VdirItemStore`]: crate::item::store::VdirItemStore
+//!
 //! # Example
 //!
 //! ```rust,no_run
@@ -32,6 +40,12 @@
 //!             }
 //!             arg = Some(VdirReply::Copy);
 //!         }
+//!         VdirCoroutineState::Yielded(VdirYield::WantsRename(pairs)) => {
+//!             for (from, to) in pairs {
+//!                 fs::rename(from.as_str(), to.as_str()).unwrap();
+//!             }
+//!             arg = Some(VdirReply::Rename);
+//!         }
 //!         VdirCoroutineState::Complete(Ok(())) => break,
 //!         VdirCoroutineState::Complete(Err(err)) => panic!("{err}"),
 //!         state => panic!("unexpected state {state:?}"),
@@ -39,13 +53,18 @@
 //! }
 //! ```
 
-use core::fmt;
+use core::{fmt, mem};
 
 use alloc::string::{String, ToString};
 
 use thiserror::Error;
 
-use crate::{coroutine::*, item::locate::*, path::VdirPath, vdir_try};
+use crate::{
+    coroutine::*,
+    item::{build_paths, locate::*},
+    path::VdirPath,
+    vdir_try,
+};
 
 /// Failure causes during a [`VdirItemCopy`] step.
 #[derive(Clone, Debug, Error)]
@@ -103,13 +122,26 @@ impl VdirCoroutine for VdirItemCopy {
         match (&mut self.state, arg) {
             (State::Locate { target, id, inner }, arg) => {
                 let out = vdir_try!(inner, arg);
-                let ext = out.kind.extension();
-                let target_path = target.join(&format!("{id}.{ext}"));
-                let pairs = vec![(out.path, target_path)];
-                self.state = State::AwaitCopy;
+                let (tmp_path, final_path) = build_paths(target, id, out.kind);
+                let pairs = vec![(out.path, tmp_path.clone())];
+                self.state = State::Copy {
+                    tmp_path,
+                    final_path,
+                };
                 VdirCoroutineState::Yielded(VdirYield::WantsCopy(pairs))
             }
-            (State::AwaitCopy, Some(VdirReply::Copy)) => VdirCoroutineState::Complete(Ok(())),
+            (
+                State::Copy {
+                    tmp_path,
+                    final_path,
+                },
+                Some(VdirReply::Copy),
+            ) => {
+                let pairs = vec![(mem::take(tmp_path), mem::take(final_path))];
+                self.state = State::Rename;
+                VdirCoroutineState::Yielded(VdirYield::WantsRename(pairs))
+            }
+            (State::Rename, Some(VdirReply::Rename)) => VdirCoroutineState::Complete(Ok(())),
             (_, arg) => {
                 let err = VdirItemCopyError::UnexpectedArg(arg);
                 VdirCoroutineState::Complete(Err(err))
@@ -125,14 +157,19 @@ enum State {
         id: String,
         inner: VdirItemLocate,
     },
-    AwaitCopy,
+    Copy {
+        tmp_path: VdirPath,
+        final_path: VdirPath,
+    },
+    Rename,
 }
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Locate { .. } => f.write_str("locate source item"),
-            Self::AwaitCopy => f.write_str("await copy reply"),
+            Self::Copy { .. } => f.write_str("copy into tmp"),
+            Self::Rename => f.write_str("rename into place"),
         }
     }
 }
@@ -144,7 +181,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn copies_located_source_to_target() {
+    fn copies_located_source_through_tmp() {
         let mut cor =
             VdirItemCopy::new("root/a", "root/b", "alice", VdirItemCopyOptions::default());
 
@@ -158,13 +195,22 @@ mod tests {
         exists.insert(vcf.clone(), true);
         exists.insert(VdirPath::from("root/a/alice.ics"), false);
 
+        // The bytes land on the tmp sibling, never on the name the
+        // target collection is enumerated by.
+        let staged = VdirPath::from("root/b/alice.vcf.tmp");
         let pairs = match cor.resume(Some(VdirReply::FileExists(exists))) {
             VdirCoroutineState::Yielded(VdirYield::WantsCopy(pairs)) => pairs,
             state => panic!("expected WantsCopy, got {state:?}"),
         };
-        assert_eq!(pairs, vec![(vcf, VdirPath::from("root/b/alice.vcf"))]);
+        assert_eq!(pairs, vec![(vcf, staged.clone())]);
 
-        match cor.resume(Some(VdirReply::Copy)) {
+        let pairs = match cor.resume(Some(VdirReply::Copy)) {
+            VdirCoroutineState::Yielded(VdirYield::WantsRename(pairs)) => pairs,
+            state => panic!("expected WantsRename, got {state:?}"),
+        };
+        assert_eq!(pairs, vec![(staged, VdirPath::from("root/b/alice.vcf"))]);
+
+        match cor.resume(Some(VdirReply::Rename)) {
             VdirCoroutineState::Complete(Ok(())) => {}
             state => panic!("expected Complete(Ok), got {state:?}"),
         }

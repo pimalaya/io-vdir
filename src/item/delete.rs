@@ -99,12 +99,10 @@ impl VdirCoroutine for VdirItemDelete {
             (State::Locate(c), arg) => {
                 let out = vdir_try!(c, arg);
                 let paths = BTreeSet::from_iter([out.path]);
-                self.state = State::AwaitRemove;
+                self.state = State::Remove;
                 VdirCoroutineState::Yielded(VdirYield::WantsFileRemove(paths))
             }
-            (State::AwaitRemove, Some(VdirReply::FileRemove)) => {
-                VdirCoroutineState::Complete(Ok(()))
-            }
+            (State::Remove, Some(VdirReply::FileRemove)) => VdirCoroutineState::Complete(Ok(())),
             (_, arg) => {
                 let err = VdirItemDeleteError::UnexpectedArg(arg);
                 VdirCoroutineState::Complete(Err(err))
@@ -116,14 +114,14 @@ impl VdirCoroutine for VdirItemDelete {
 #[derive(Debug)]
 enum State {
     Locate(VdirItemLocate),
-    AwaitRemove,
+    Remove,
 }
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Locate(_) => f.write_str("locate item"),
-            Self::AwaitRemove => f.write_str("await remove reply"),
+            Self::Remove => f.write_str("remove item"),
         }
     }
 }

@@ -114,7 +114,7 @@ impl VdirCoroutine for VdirItemLocate {
                 let ics_path = collection.join(&format!("{id}.{ICS}"));
 
                 let probes = BTreeSet::from_iter([vcf_path.clone(), ics_path.clone()]);
-                self.state = State::AwaitProbe {
+                self.state = State::Probe {
                     id,
                     vcf_path,
                     ics_path,
@@ -122,7 +122,7 @@ impl VdirCoroutine for VdirItemLocate {
                 VdirCoroutineState::Yielded(VdirYield::WantsFileExists(probes))
             }
             (
-                State::AwaitProbe {
+                State::Probe {
                     id,
                     vcf_path,
                     ics_path,
@@ -162,7 +162,7 @@ enum State {
         collection: VdirPath,
         id: String,
     },
-    AwaitProbe {
+    Probe {
         id: String,
         vcf_path: VdirPath,
         ics_path: VdirPath,
@@ -173,7 +173,7 @@ impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Start { .. } => f.write_str("start"),
-            Self::AwaitProbe { .. } => f.write_str("await probe reply"),
+            Self::Probe { .. } => f.write_str("probe extensions"),
         }
     }
 }

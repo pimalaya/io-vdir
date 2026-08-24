@@ -126,29 +126,29 @@ impl VdirCoroutine for VdirCollectionUpdate {
                 field(COLOR, collection.color.clone());
 
                 if files.is_empty() {
-                    self.state = State::AwaitFileRemove;
+                    self.state = State::RemoveFiles;
                     return VdirCoroutineState::Yielded(VdirYield::WantsFileRemove(removals));
                 }
 
-                self.state = State::AwaitFileCreate { renames, removals };
+                self.state = State::CreateFile { renames, removals };
                 VdirCoroutineState::Yielded(VdirYield::WantsFileCreate(files))
             }
-            (State::AwaitFileCreate { renames, removals }, Some(VdirReply::FileCreate)) => {
+            (State::CreateFile { renames, removals }, Some(VdirReply::FileCreate)) => {
                 let renames = mem::take(renames);
                 let removals = mem::take(removals);
-                self.state = State::AwaitRename { removals };
+                self.state = State::Rename { removals };
                 VdirCoroutineState::Yielded(VdirYield::WantsRename(renames))
             }
-            (State::AwaitRename { removals }, Some(VdirReply::Rename)) => {
+            (State::Rename { removals }, Some(VdirReply::Rename)) => {
                 let removals = mem::take(removals);
                 if removals.is_empty() {
                     return VdirCoroutineState::Complete(Ok(()));
                 }
 
-                self.state = State::AwaitFileRemove;
+                self.state = State::RemoveFiles;
                 VdirCoroutineState::Yielded(VdirYield::WantsFileRemove(removals))
             }
-            (State::AwaitFileRemove, Some(VdirReply::FileRemove)) => {
+            (State::RemoveFiles, Some(VdirReply::FileRemove)) => {
                 VdirCoroutineState::Complete(Ok(()))
             }
             (_, arg) => {
@@ -162,23 +162,23 @@ impl VdirCoroutine for VdirCollectionUpdate {
 #[derive(Debug)]
 enum State {
     Start(VdirCollection),
-    AwaitFileCreate {
+    CreateFile {
         renames: Vec<(VdirPath, VdirPath)>,
         removals: BTreeSet<VdirPath>,
     },
-    AwaitRename {
+    Rename {
         removals: BTreeSet<VdirPath>,
     },
-    AwaitFileRemove,
+    RemoveFiles,
 }
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Start(_) => f.write_str("start"),
-            Self::AwaitFileCreate { .. } => f.write_str("await file create reply"),
-            Self::AwaitRename { .. } => f.write_str("await rename reply"),
-            Self::AwaitFileRemove => f.write_str("await file remove reply"),
+            Self::CreateFile { .. } => f.write_str("write metadata into tmp"),
+            Self::Rename { .. } => f.write_str("rename into place"),
+            Self::RemoveFiles => f.write_str("remove cleared metadata"),
         }
     }
 }

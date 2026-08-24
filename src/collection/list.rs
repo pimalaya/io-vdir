@@ -126,10 +126,10 @@ impl VdirCoroutine for VdirCollectionList {
         match (&mut self.state, arg) {
             (State::Start(root), None) => {
                 let paths = BTreeSet::from_iter([mem::take(root)]);
-                self.state = State::AwaitChildrenRead;
+                self.state = State::ReadChildren;
                 VdirCoroutineState::Yielded(VdirYield::WantsDirRead(paths))
             }
-            (State::AwaitChildrenRead, Some(VdirReply::DirRead(entries))) => {
+            (State::ReadChildren, Some(VdirReply::DirRead(entries))) => {
                 let mut candidates = BTreeSet::new();
 
                 for paths in entries.into_values() {
@@ -151,10 +151,10 @@ impl VdirCoroutine for VdirCollectionList {
                 }
 
                 let probes = candidates.clone();
-                self.state = State::AwaitDirExists { candidates };
+                self.state = State::ProbeDirs { candidates };
                 VdirCoroutineState::Yielded(VdirYield::WantsDirExists(probes))
             }
-            (State::AwaitDirExists { candidates }, Some(VdirReply::DirExists(probes))) => {
+            (State::ProbeDirs { candidates }, Some(VdirReply::DirExists(probes))) => {
                 let collection_paths: BTreeSet<VdirPath> = mem::take(candidates)
                     .into_iter()
                     .filter(|p| probes.get(p).copied().unwrap_or(false))
@@ -173,14 +173,14 @@ impl VdirCoroutine for VdirCollectionList {
                 }
 
                 let probe_paths: BTreeSet<VdirPath> = probes.keys().cloned().collect();
-                self.state = State::AwaitMetadataExists {
+                self.state = State::ProbeMetadata {
                     collection_paths,
                     probes,
                 };
                 VdirCoroutineState::Yielded(VdirYield::WantsFileExists(probe_paths))
             }
             (
-                State::AwaitMetadataExists {
+                State::ProbeMetadata {
                     collection_paths,
                     probes,
                 },
@@ -201,14 +201,14 @@ impl VdirCoroutine for VdirCollectionList {
                 }
 
                 let probe_paths: BTreeSet<VdirPath> = probes.keys().cloned().collect();
-                self.state = State::AwaitMetadataRead {
+                self.state = State::ReadMetadata {
                     collection_paths,
                     probes,
                 };
                 VdirCoroutineState::Yielded(VdirYield::WantsFileRead(probe_paths))
             }
             (
-                State::AwaitMetadataRead {
+                State::ReadMetadata {
                     collection_paths,
                     probes,
                 },
@@ -260,15 +260,15 @@ impl VdirCoroutine for VdirCollectionList {
 #[derive(Debug)]
 enum State {
     Start(VdirPath),
-    AwaitChildrenRead,
-    AwaitDirExists {
+    ReadChildren,
+    ProbeDirs {
         candidates: BTreeSet<VdirPath>,
     },
-    AwaitMetadataExists {
+    ProbeMetadata {
         collection_paths: BTreeSet<VdirPath>,
         probes: BTreeMap<VdirPath, VdirPath>,
     },
-    AwaitMetadataRead {
+    ReadMetadata {
         collection_paths: BTreeSet<VdirPath>,
         probes: BTreeMap<VdirPath, VdirPath>,
     },
@@ -278,10 +278,10 @@ impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Start(_) => f.write_str("start"),
-            Self::AwaitChildrenRead => f.write_str("await children read reply"),
-            Self::AwaitDirExists { .. } => f.write_str("await dir exists reply"),
-            Self::AwaitMetadataExists { .. } => f.write_str("await metadata exists reply"),
-            Self::AwaitMetadataRead { .. } => f.write_str("await metadata read reply"),
+            Self::ReadChildren => f.write_str("read children"),
+            Self::ProbeDirs { .. } => f.write_str("probe dirs"),
+            Self::ProbeMetadata { .. } => f.write_str("probe metadata"),
+            Self::ReadMetadata { .. } => f.write_str("read metadata"),
         }
     }
 }

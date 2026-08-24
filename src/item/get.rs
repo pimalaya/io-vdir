@@ -110,13 +110,13 @@ impl VdirCoroutine for VdirItemGet {
             (State::Locate(c), arg) => {
                 let out = vdir_try!(c, arg);
                 let paths = BTreeSet::from_iter([out.path.clone()]);
-                self.state = State::AwaitRead {
+                self.state = State::Read {
                     path: out.path,
                     kind: out.kind,
                 };
                 VdirCoroutineState::Yielded(VdirYield::WantsFileRead(paths))
             }
-            (State::AwaitRead { path, kind }, Some(VdirReply::FileRead(mut map))) => {
+            (State::Read { path, kind }, Some(VdirReply::FileRead(mut map))) => {
                 let path = mem::take(path);
                 let kind = *kind;
                 let contents = map.remove(&path).unwrap_or_default();
@@ -137,14 +137,14 @@ impl VdirCoroutine for VdirItemGet {
 #[derive(Debug)]
 enum State {
     Locate(VdirItemLocate),
-    AwaitRead { path: VdirPath, kind: VdirItemKind },
+    Read { path: VdirPath, kind: VdirItemKind },
 }
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Locate(_) => f.write_str("locate item"),
-            Self::AwaitRead { .. } => f.write_str("await read reply"),
+            Self::Read { .. } => f.write_str("read item"),
         }
     }
 }

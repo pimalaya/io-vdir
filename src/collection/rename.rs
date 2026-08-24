@@ -84,10 +84,10 @@ impl VdirCoroutine for VdirCollectionRename {
         match (&mut self.state, arg) {
             (State::Start { pairs }, None) => {
                 let pairs = mem::take(pairs);
-                self.state = State::AwaitRename;
+                self.state = State::Rename;
                 VdirCoroutineState::Yielded(VdirYield::WantsRename(pairs))
             }
-            (State::AwaitRename, Some(VdirReply::Rename)) => VdirCoroutineState::Complete(Ok(())),
+            (State::Rename, Some(VdirReply::Rename)) => VdirCoroutineState::Complete(Ok(())),
             (_, arg) => {
                 let err = VdirCollectionRenameError::UnexpectedArg(arg);
                 VdirCoroutineState::Complete(Err(err))
@@ -99,14 +99,14 @@ impl VdirCoroutine for VdirCollectionRename {
 #[derive(Debug)]
 enum State {
     Start { pairs: Vec<(VdirPath, VdirPath)> },
-    AwaitRename,
+    Rename,
 }
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Start { .. } => f.write_str("start"),
-            Self::AwaitRename => f.write_str("await rename reply"),
+            Self::Rename => f.write_str("rename collection"),
         }
     }
 }

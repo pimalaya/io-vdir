@@ -106,10 +106,10 @@ impl VdirCoroutine for VdirItemMove {
                 let ext = out.kind.extension();
                 let target_path = target.join(&format!("{id}.{ext}"));
                 let pairs = vec![(out.path, target_path)];
-                self.state = State::AwaitRename;
+                self.state = State::Rename;
                 VdirCoroutineState::Yielded(VdirYield::WantsRename(pairs))
             }
-            (State::AwaitRename, Some(VdirReply::Rename)) => VdirCoroutineState::Complete(Ok(())),
+            (State::Rename, Some(VdirReply::Rename)) => VdirCoroutineState::Complete(Ok(())),
             (_, arg) => {
                 let err = VdirItemMoveError::UnexpectedArg(arg);
                 VdirCoroutineState::Complete(Err(err))
@@ -125,14 +125,14 @@ enum State {
         id: String,
         inner: VdirItemLocate,
     },
-    AwaitRename,
+    Rename,
 }
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Locate { .. } => f.write_str("locate source item"),
-            Self::AwaitRename => f.write_str("await rename reply"),
+            Self::Rename => f.write_str("rename item"),
         }
     }
 }

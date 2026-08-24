@@ -4,6 +4,12 @@
 //! carries metadata (`display_name`, `description` or `color`), writes
 //! the corresponding marker files.
 //!
+//! Each marker file lands on its `.tmp` sibling and is renamed into
+//! place, as [`VdirCollectionUpdate`] writes them, so a reader
+//! scanning the new collection reads a whole value or no file at all.
+//!
+//! [`VdirCollectionUpdate`]: crate::collection::update::VdirCollectionUpdate
+//!
 //! # Example
 //!
 //! ```rust,no_run
@@ -32,6 +38,12 @@
 //!             }
 //!             arg = Some(VdirReply::FileCreate);
 //!         }
+//!         VdirCoroutineState::Yielded(VdirYield::WantsRename(pairs)) => {
+//!             for (from, to) in pairs {
+//!                 fs::rename(from.as_str(), to.as_str()).unwrap();
+//!             }
+//!             arg = Some(VdirReply::Rename);
+//!         }
 //!         VdirCoroutineState::Complete(Ok(())) => break,
 //!         VdirCoroutineState::Complete(Err(err)) => panic!("{err}"),
 //!         state => panic!("unexpected state {state:?}"),
@@ -41,13 +53,19 @@
 
 use core::{fmt, mem};
 
-use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    string::String,
+    vec::Vec,
+};
 
 use thiserror::Error;
 
 use crate::{
     collection::{COLOR, DESCRIPTION, DISPLAYNAME, VdirCollection},
     coroutine::*,
+    item::TMP,
+    path::VdirPath,
 };
 
 /// Failure causes during a [`VdirCollectionCreate`] step.
@@ -90,35 +108,42 @@ impl VdirCoroutine for VdirCollectionCreate {
             (State::Start(collection), None) => {
                 let collection = mem::take(collection);
                 let dirs = BTreeSet::from_iter([collection.path.clone()]);
-                self.state = State::AwaitDirCreate(collection);
+                self.state = State::CreateDir(collection);
                 VdirCoroutineState::Yielded(VdirYield::WantsDirCreate(dirs))
             }
-            (State::AwaitDirCreate(collection), Some(VdirReply::DirCreate)) => {
+            (State::CreateDir(collection), Some(VdirReply::DirCreate)) => {
                 let collection = mem::take(collection);
                 let mut files = BTreeMap::new();
+                let mut renames = Vec::new();
 
-                if let Some(name) = collection.display_name.filter(|s| !s.is_empty()) {
-                    files.insert(collection.path.join(DISPLAYNAME), name.into_bytes());
-                }
+                let mut field = |name: &str, value: Option<String>| {
+                    let Some(value) = value.filter(|value| !value.is_empty()) else {
+                        return;
+                    };
 
-                if let Some(desc) = collection.description.filter(|s| !s.is_empty()) {
-                    files.insert(collection.path.join(DESCRIPTION), desc.into_bytes());
-                }
+                    let final_path = collection.path.join(name);
+                    let tmp_path = final_path.with_file_name(&format!("{name}.{TMP}"));
+                    files.insert(tmp_path.clone(), value.into_bytes());
+                    renames.push((tmp_path, final_path));
+                };
 
-                if let Some(color) = collection.color.filter(|s| !s.is_empty()) {
-                    files.insert(collection.path.join(COLOR), color.into_bytes());
-                }
+                field(DISPLAYNAME, collection.display_name.clone());
+                field(DESCRIPTION, collection.description.clone());
+                field(COLOR, collection.color.clone());
 
                 if files.is_empty() {
                     return VdirCoroutineState::Complete(Ok(()));
                 }
 
-                self.state = State::AwaitFileCreate;
+                self.state = State::CreateFile { renames };
                 VdirCoroutineState::Yielded(VdirYield::WantsFileCreate(files))
             }
-            (State::AwaitFileCreate, Some(VdirReply::FileCreate)) => {
-                VdirCoroutineState::Complete(Ok(()))
+            (State::CreateFile { renames }, Some(VdirReply::FileCreate)) => {
+                let renames = mem::take(renames);
+                self.state = State::Rename;
+                VdirCoroutineState::Yielded(VdirYield::WantsRename(renames))
             }
+            (State::Rename, Some(VdirReply::Rename)) => VdirCoroutineState::Complete(Ok(())),
             (_, arg) => {
                 let err = VdirCollectionCreateError::UnexpectedArg(arg);
                 VdirCoroutineState::Complete(Err(err))
@@ -130,16 +155,18 @@ impl VdirCoroutine for VdirCollectionCreate {
 #[derive(Debug)]
 enum State {
     Start(VdirCollection),
-    AwaitDirCreate(VdirCollection),
-    AwaitFileCreate,
+    CreateDir(VdirCollection),
+    CreateFile { renames: Vec<(VdirPath, VdirPath)> },
+    Rename,
 }
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Start(_) => f.write_str("start"),
-            Self::AwaitDirCreate(_) => f.write_str("await dir create reply"),
-            Self::AwaitFileCreate => f.write_str("await file create reply"),
+            Self::CreateDir(_) => f.write_str("create collection dir"),
+            Self::CreateFile { .. } => f.write_str("write metadata into tmp"),
+            Self::Rename => f.write_str("rename into place"),
         }
     }
 }
@@ -175,15 +202,31 @@ mod tests {
 
         let _ = expect_wants_dir_create(&mut cor);
 
+        // The values land on their tmp siblings, never on the marker
+        // names a reader looks for.
         let files = match cor.resume(Some(VdirReply::DirCreate)) {
             VdirCoroutineState::Yielded(VdirYield::WantsFileCreate(files)) => files,
             state => panic!("expected WantsFileCreate, got {state:?}"),
         };
-        assert!(files.contains_key(&VdirPath::from("root/contacts/displayname")));
-        assert!(files.contains_key(&VdirPath::from("root/contacts/color")));
-        assert!(!files.contains_key(&VdirPath::from("root/contacts/description")));
+        assert!(files.contains_key(&VdirPath::from("root/contacts/displayname.tmp")));
+        assert!(files.contains_key(&VdirPath::from("root/contacts/color.tmp")));
+        assert!(!files.contains_key(&VdirPath::from("root/contacts/displayname")));
+        assert!(!files.contains_key(&VdirPath::from("root/contacts/description.tmp")));
 
-        expect_complete_ok(&mut cor, Some(VdirReply::FileCreate));
+        let pairs = match cor.resume(Some(VdirReply::FileCreate)) {
+            VdirCoroutineState::Yielded(VdirYield::WantsRename(pairs)) => pairs,
+            state => panic!("expected WantsRename, got {state:?}"),
+        };
+        assert!(pairs.contains(&(
+            VdirPath::from("root/contacts/displayname.tmp"),
+            VdirPath::from("root/contacts/displayname"),
+        )));
+        assert!(pairs.contains(&(
+            VdirPath::from("root/contacts/color.tmp"),
+            VdirPath::from("root/contacts/color"),
+        )));
+
+        expect_complete_ok(&mut cor, Some(VdirReply::Rename));
     }
 
     #[test]

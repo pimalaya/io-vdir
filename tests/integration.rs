@@ -135,6 +135,10 @@ fn end_to_end() {
         .expect("copy alice");
     let items = client.list_items(work.path.clone()).expect("list work");
     assert_eq!(items.len(), 1);
+    assert!(
+        !Path::new(work.path.join("alice.vcf.tmp").as_str()).exists(),
+        "the copy must leave no staged file behind",
+    );
 
     // move bob to work
     client

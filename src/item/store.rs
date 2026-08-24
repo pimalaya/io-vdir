@@ -54,7 +54,7 @@ use thiserror::Error;
 
 use crate::{
     coroutine::*,
-    item::{TMP, VdirItemKind},
+    item::{VdirItemKind, build_paths},
     path::VdirPath,
 };
 
@@ -141,7 +141,7 @@ impl VdirCoroutine for VdirItemStore {
                     Some(id) => {
                         let (tmp_path, final_path) = build_paths(&collection, &id, kind);
                         let files = BTreeMap::from_iter([(tmp_path.clone(), contents)]);
-                        self.state = State::AwaitFileCreate {
+                        self.state = State::CreateFile {
                             id,
                             tmp_path,
                             final_path,
@@ -149,7 +149,7 @@ impl VdirCoroutine for VdirItemStore {
                         VdirCoroutineState::Yielded(VdirYield::WantsFileCreate(files))
                     }
                     None => {
-                        self.state = State::AwaitRandom {
+                        self.state = State::ReadRandom {
                             collection,
                             kind,
                             contents,
@@ -159,7 +159,7 @@ impl VdirCoroutine for VdirItemStore {
                 }
             }
             (
-                State::AwaitRandom {
+                State::ReadRandom {
                     collection,
                     kind,
                     contents,
@@ -173,7 +173,7 @@ impl VdirCoroutine for VdirItemStore {
                 let id = uuid_v4(&bytes);
                 let (tmp_path, final_path) = build_paths(&collection, &id, kind);
                 let files = BTreeMap::from_iter([(tmp_path.clone(), contents)]);
-                self.state = State::AwaitFileCreate {
+                self.state = State::CreateFile {
                     id,
                     tmp_path,
                     final_path,
@@ -181,7 +181,7 @@ impl VdirCoroutine for VdirItemStore {
                 VdirCoroutineState::Yielded(VdirYield::WantsFileCreate(files))
             }
             (
-                State::AwaitFileCreate {
+                State::CreateFile {
                     id,
                     tmp_path,
                     final_path,
@@ -193,10 +193,10 @@ impl VdirCoroutine for VdirItemStore {
                 let final_path = mem::take(final_path);
 
                 let pairs = vec![(tmp_path, final_path.clone())];
-                self.state = State::AwaitRename { id, final_path };
+                self.state = State::Rename { id, final_path };
                 VdirCoroutineState::Yielded(VdirYield::WantsRename(pairs))
             }
-            (State::AwaitRename { id, final_path }, Some(VdirReply::Rename)) => {
+            (State::Rename { id, final_path }, Some(VdirReply::Rename)) => {
                 let out = VdirItemStoreOutput {
                     id: mem::take(id),
                     path: mem::take(final_path),
@@ -219,17 +219,17 @@ enum State {
         kind: VdirItemKind,
         contents: Vec<u8>,
     },
-    AwaitRandom {
+    ReadRandom {
         collection: VdirPath,
         kind: VdirItemKind,
         contents: Vec<u8>,
     },
-    AwaitFileCreate {
+    CreateFile {
         id: String,
         tmp_path: VdirPath,
         final_path: VdirPath,
     },
-    AwaitRename {
+    Rename {
         id: String,
         final_path: VdirPath,
     },
@@ -239,20 +239,11 @@ impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Start { .. } => f.write_str("start"),
-            Self::AwaitRandom { .. } => f.write_str("await random reply"),
-            Self::AwaitFileCreate { .. } => f.write_str("await file create reply"),
-            Self::AwaitRename { .. } => f.write_str("await rename reply"),
+            Self::ReadRandom { .. } => f.write_str("read random"),
+            Self::CreateFile { .. } => f.write_str("write item into tmp"),
+            Self::Rename { .. } => f.write_str("rename into place"),
         }
     }
-}
-
-/// Builds the `(tmp, final)` paths for item `id` of `kind` under
-/// `collection`.
-fn build_paths(collection: &VdirPath, id: &str, kind: VdirItemKind) -> (VdirPath, VdirPath) {
-    let ext = kind.extension();
-    let final_path = collection.join(&format!("{id}.{ext}"));
-    let tmp_path = collection.join(&format!("{id}.{ext}.{TMP}"));
-    (tmp_path, final_path)
 }
 
 /// Formats 16 raw bytes as a canonical UUIDv4 string, stamping the

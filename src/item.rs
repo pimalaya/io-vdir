@@ -67,6 +67,20 @@ impl VdirItemKind {
     }
 }
 
+/// Builds the `(tmp, final)` paths for item `id` of `kind` under
+/// `collection`. Bytes land on the first and are renamed onto the
+/// second, so the item is only ever enumerated whole.
+pub(crate) fn build_paths(
+    collection: &VdirPath,
+    id: &str,
+    kind: VdirItemKind,
+) -> (VdirPath, VdirPath) {
+    let ext = kind.extension();
+    let final_path = collection.join(&format!("{id}.{ext}"));
+    let tmp_path = collection.join(&format!("{id}.{ext}.{TMP}"));
+    (tmp_path, final_path)
+}
+
 /// A Vdir collection's item.
 ///
 /// Carries the on-disk path, the parsed kind (from the file

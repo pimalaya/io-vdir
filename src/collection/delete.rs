@@ -75,12 +75,10 @@ impl VdirCoroutine for VdirCollectionDelete {
         match (&mut self.state, arg) {
             (State::Start { paths }, None) => {
                 let paths = mem::take(paths);
-                self.state = State::AwaitRemove;
+                self.state = State::Remove;
                 VdirCoroutineState::Yielded(VdirYield::WantsDirRemove(paths))
             }
-            (State::AwaitRemove, Some(VdirReply::DirRemove)) => {
-                VdirCoroutineState::Complete(Ok(()))
-            }
+            (State::Remove, Some(VdirReply::DirRemove)) => VdirCoroutineState::Complete(Ok(())),
             (_, arg) => {
                 let err = VdirCollectionDeleteError::UnexpectedArg(arg);
                 VdirCoroutineState::Complete(Err(err))
@@ -92,14 +90,14 @@ impl VdirCoroutine for VdirCollectionDelete {
 #[derive(Debug)]
 enum State {
     Start { paths: BTreeSet<VdirPath> },
-    AwaitRemove,
+    Remove,
 }
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Start { .. } => f.write_str("start"),
-            Self::AwaitRemove => f.write_str("await remove reply"),
+            Self::Remove => f.write_str("remove collection"),
         }
     }
 }

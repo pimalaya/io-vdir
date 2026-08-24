@@ -102,10 +102,10 @@ impl VdirCoroutine for VdirItemList {
         match (&mut self.state, arg) {
             (State::Start(collection), None) => {
                 let paths = BTreeSet::from_iter([mem::take(collection)]);
-                self.state = State::AwaitDirRead;
+                self.state = State::ReadDir;
                 VdirCoroutineState::Yielded(VdirYield::WantsDirRead(paths))
             }
-            (State::AwaitDirRead, Some(VdirReply::DirRead(entries))) => {
+            (State::ReadDir, Some(VdirReply::DirRead(entries))) => {
                 let mut kinds: BTreeMap<VdirPath, VdirItemKind> = BTreeMap::new();
 
                 for paths in entries.into_values() {
@@ -131,10 +131,10 @@ impl VdirCoroutine for VdirItemList {
                 }
 
                 let probes: BTreeSet<VdirPath> = kinds.keys().cloned().collect();
-                self.state = State::AwaitFileRead { kinds };
+                self.state = State::ReadFiles { kinds };
                 VdirCoroutineState::Yielded(VdirYield::WantsFileRead(probes))
             }
-            (State::AwaitFileRead { kinds }, Some(VdirReply::FileRead(mut contents))) => {
+            (State::ReadFiles { kinds }, Some(VdirReply::FileRead(mut contents))) => {
                 let mut items = BTreeSet::new();
 
                 for (path, kind) in mem::take(kinds) {
@@ -160,8 +160,8 @@ impl VdirCoroutine for VdirItemList {
 #[derive(Debug)]
 enum State {
     Start(VdirPath),
-    AwaitDirRead,
-    AwaitFileRead {
+    ReadDir,
+    ReadFiles {
         kinds: BTreeMap<VdirPath, VdirItemKind>,
     },
 }
@@ -170,8 +170,8 @@ impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Start(_) => f.write_str("start"),
-            Self::AwaitDirRead => f.write_str("await dir read reply"),
-            Self::AwaitFileRead { .. } => f.write_str("await file read reply"),
+            Self::ReadDir => f.write_str("read collection dir"),
+            Self::ReadFiles { .. } => f.write_str("read items"),
         }
     }
 }

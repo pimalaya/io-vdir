@@ -15,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The std client's file removal is idempotent: removing a path that does not exist is a success, since a coroutine asking for a file to be gone is satisfied by its absence.
 
+### Fixed
+
+- Fixed `VdirItemCopy` writing straight onto the target item name.
+
+  The bytes went to the name the target collection is enumerated under, so a reader scanning it during the copy saw a truncated item, and a process dying mid-copy left one behind. A copy keeps the source id, so that name may already hold an item, which was destroyed rather than replaced. The copy now lands on the target's `.tmp` sibling and one rename publishes it, as the store already did, so the item under that name is either the old one or the new one.
+
+- Fixed `VdirCollectionCreate` writing its metadata marker files straight onto their final names.
+
+  A reader scanning a collection being created could read an empty or half-written display name and take it for the truth. Each marker file now lands on its `.tmp` sibling and is renamed into place, as `VdirCollectionUpdate` already wrote them.
+
 ## [0.1.0] - 2026-07-16
 
 ### Changed
