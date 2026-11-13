@@ -1,7 +1,8 @@
 //! I/O-free coroutine locating a Vdir item file by its ID.
 //!
 //! Probes `<collection>/<id>.vcf` and `<collection>/<id>.ics` in a
-//! single batched file-exists request.
+//! single batched file-exists request. An id that is empty, or holds
+//! a NUL or a path separator, is refused before any request.
 //!
 //! # Example
 //!
@@ -47,7 +48,7 @@ use thiserror::Error;
 use crate::{
     coroutine::*,
     item::{ICS, VCF, VdirItemKind},
-    path::VdirPath,
+    path::{VdirPath, is_stem},
 };
 
 /// Failure causes during a [`VdirItemLocate`] step.
@@ -61,6 +62,10 @@ pub enum VdirItemLocateError {
     /// No item with the given id exists in the collection.
     #[error("Vdir item locate failed: item {0} not found")]
     NotFound(String),
+
+    /// The given id cannot name an item of the collection.
+    #[error("Vdir item locate failed: invalid item id {0:?}")]
+    InvalidId(String),
 }
 
 /// Successful output of [`VdirItemLocate`].
@@ -110,6 +115,12 @@ impl VdirCoroutine for VdirItemLocate {
         match (&mut self.state, arg) {
             (State::Start { collection, id }, None) => {
                 let id = mem::take(id);
+
+                if !is_stem(&id) {
+                    let err = VdirItemLocateError::InvalidId(id);
+                    return VdirCoroutineState::Complete(Err(err));
+                }
+
                 let vcf_path = collection.join(&format!("{id}.{VCF}"));
                 let ics_path = collection.join(&format!("{id}.{ICS}"));
 
@@ -182,6 +193,8 @@ impl fmt::Display for State {
 mod tests {
     use alloc::collections::BTreeMap;
 
+    use crate::item::{VdirItem, list::*};
+
     use super::*;
 
     #[test]
@@ -224,6 +237,47 @@ mod tests {
 
         let err = expect_complete_err(&mut cor, Some(VdirReply::DirCreate));
         assert!(matches!(err, VdirItemLocateError::UnexpectedArg(_)));
+    }
+
+    #[test]
+    fn listed_dot_prefixed_id_is_located() {
+        let collection = VdirPath::from("root/contacts");
+        let vcf = collection.join(".alice.vcf");
+
+        let mut list = VdirItemList::new(collection.clone(), VdirItemListOptions::default());
+        let _ = list.resume(None);
+
+        let names = BTreeSet::from_iter([vcf.clone()]);
+        let entries = BTreeMap::from_iter([(collection.clone(), names)]);
+        let _ = list.resume(Some(VdirReply::DirRead(entries)));
+
+        let contents = BTreeMap::from_iter([(vcf.clone(), b"BEGIN:VCARD".to_vec())]);
+        let items = match list.resume(Some(VdirReply::FileRead(contents))) {
+            VdirCoroutineState::Complete(Ok(items)) => items,
+            state => panic!("expected Complete(Ok), got {state:?}"),
+        };
+        let id = items.first().and_then(VdirItem::id).expect("listed id");
+
+        let mut cor = VdirItemLocate::new(collection, id, VdirItemLocateOptions::default());
+        let probes = expect_wants_file_exists(&mut cor);
+        assert!(probes.contains(&vcf));
+
+        let exists = BTreeMap::from_iter([(vcf.clone(), true)]);
+        let out = expect_complete_ok(&mut cor, Some(VdirReply::FileExists(exists)));
+        assert_eq!(out.path, vcf);
+    }
+
+    #[test]
+    fn invalid_id_returns_error() {
+        for id in ["", "../work/alice", "a/b", "a\0b"] {
+            let mut cor =
+                VdirItemLocate::new("root/contacts", id, VdirItemLocateOptions::default());
+
+            match cor.resume(None) {
+                VdirCoroutineState::Complete(Err(VdirItemLocateError::InvalidId(_))) => {}
+                state => panic!("expected InvalidId for {id:?}, got {state:?}"),
+            }
+        }
     }
 
     fn expect_wants_file_exists(cor: &mut VdirItemLocate) -> BTreeSet<VdirPath> {

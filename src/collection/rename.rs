@@ -1,5 +1,8 @@
 //! I/O-free coroutine renaming a Vdir collection directory.
 //!
+//! A new name that is empty, starts with a dot, or holds a NUL or a
+//! path separator is refused before any request.
+//!
 //! # Example
 //!
 //! ```rust,no_run
@@ -28,11 +31,14 @@
 
 use core::{fmt, mem};
 
-use alloc::{string::ToString, vec::Vec};
+use alloc::string::{String, ToString};
 
 use thiserror::Error;
 
-use crate::{coroutine::*, path::VdirPath};
+use crate::{
+    coroutine::*,
+    path::{VdirPath, is_name},
+};
 
 /// Failure causes during a [`VdirCollectionRename`] step.
 #[derive(Clone, Debug, Error)]
@@ -41,6 +47,10 @@ pub enum VdirCollectionRenameError {
     /// request.
     #[error("Vdir collection rename failed: unexpected arg {0:?}")]
     UnexpectedArg(Option<VdirReply>),
+
+    /// The new name cannot name a collection next to the renamed one.
+    #[error("Vdir collection rename failed: invalid collection name {0:?}")]
+    InvalidName(String),
 }
 
 /// Options for [`VdirCollectionRename::new`].
@@ -64,13 +74,11 @@ impl VdirCollectionRename {
         name: impl ToString,
         opts: VdirCollectionRenameOptions,
     ) -> Self {
-        let from = path.into();
-        let to = from.with_file_name(&name.to_string());
-
         Self {
             opts,
             state: State::Start {
-                pairs: vec![(from, to)],
+                path: path.into(),
+                name: name.to_string(),
             },
         }
     }
@@ -82,8 +90,17 @@ impl VdirCoroutine for VdirCollectionRename {
 
     fn resume(&mut self, arg: Option<VdirReply>) -> VdirCoroutineState<Self::Yield, Self::Return> {
         match (&mut self.state, arg) {
-            (State::Start { pairs }, None) => {
-                let pairs = mem::take(pairs);
+            (State::Start { path, name }, None) => {
+                let name = mem::take(name);
+
+                if !is_name(&name) {
+                    let err = VdirCollectionRenameError::InvalidName(name);
+                    return VdirCoroutineState::Complete(Err(err));
+                }
+
+                let from = mem::take(path);
+                let to = from.with_file_name(&name);
+                let pairs = vec![(from, to)];
                 self.state = State::Rename;
                 VdirCoroutineState::Yielded(VdirYield::WantsRename(pairs))
             }
@@ -98,7 +115,7 @@ impl VdirCoroutine for VdirCollectionRename {
 
 #[derive(Debug)]
 enum State {
-    Start { pairs: Vec<(VdirPath, VdirPath)> },
+    Start { path: VdirPath, name: String },
     Rename,
 }
 
@@ -155,5 +172,21 @@ mod tests {
             state => panic!("expected Complete(Err), got {state:?}"),
         };
         assert!(matches!(err, VdirCollectionRenameError::UnexpectedArg(_)));
+    }
+
+    #[test]
+    fn invalid_name_returns_error() {
+        for name in ["", ".people", "..", "../people", "a/b", "a\0b"] {
+            let mut cor = VdirCollectionRename::new(
+                "root/contacts",
+                name,
+                VdirCollectionRenameOptions::default(),
+            );
+
+            match cor.resume(None) {
+                VdirCoroutineState::Complete(Err(VdirCollectionRenameError::InvalidName(_))) => {}
+                state => panic!("expected InvalidName for {name:?}, got {state:?}"),
+            }
+        }
     }
 }

@@ -128,11 +128,49 @@ impl AsRef<std::path::Path> for VdirPath {
     }
 }
 
+/// Returns `true` when `stem` can take an extension and stay one path
+/// component: not empty, no NUL and no path separator.
+pub(crate) fn is_stem(stem: &str) -> bool {
+    if stem.is_empty() || stem.contains(['/', '\0']) {
+        return false;
+    }
+
+    !(cfg!(windows) && stem.contains(['\\', ':']))
+}
+
+/// Returns `true` when `name` is one visible path component: a stem
+/// with no leading dot.
+pub(crate) fn is_name(name: &str) -> bool {
+    is_stem(name) && !name.starts_with('.')
+}
+
 #[cfg(test)]
 mod tests {
     use alloc::vec::Vec;
 
-    use crate::path::VdirPath;
+    use crate::path::{VdirPath, is_name, is_stem};
+
+    #[test]
+    fn is_stem_refuses_only_what_leaves() {
+        for stem in ["alice", "a.b", "a b", "displayname", ".alice", ".."] {
+            assert!(is_stem(stem), "{stem:?}");
+        }
+
+        for stem in ["", "a/b", "/a", "a/", "../a", "a\0b"] {
+            assert!(!is_stem(stem), "{stem:?}");
+        }
+    }
+
+    #[test]
+    fn is_name_refuses_what_leaves_or_hides() {
+        for name in ["alice", "a.b", "a b"] {
+            assert!(is_name(name), "{name:?}");
+        }
+
+        for name in ["", ".", "..", ".alice", "a/b", "/a", "a/", "a\0b"] {
+            assert!(!is_name(name), "{name:?}");
+        }
+    }
 
     #[test]
     fn join_inserts_separator() {

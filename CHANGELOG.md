@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed item ids reaching paths unchecked.
+
+  `VdirItemLocate` and `VdirItemStore` refuse an id that is empty or holds a NUL or a path separator, before any request; get, copy, move and delete inherit it from the locate.
+
+  **Breaking**: `VdirItemLocateError` and `VdirItemStoreError` gained an `InvalidId` variant.
+
+- Fixed `VdirCollectionRename` joining its new name unchecked.
+
+  A name that is empty, starts with a dot, or holds a NUL or a path separator is refused before any request.
+
+  **Breaking**: `VdirCollectionRenameError` gained an `InvalidName` variant.
+
+- Fixed `VdirItemStore` panicking on a random reply shorter than 16 bytes: it completes with `UnexpectedArg`.
+
 ## [0.2.0] - 2026-08-24
 
 ### Changed

@@ -175,3 +175,54 @@ fn end_to_end() {
     assert_eq!(listed.len(), 1);
     assert!(listed.iter().any(|c| c.path == archive_path));
 }
+
+#[test]
+fn ids_and_names_stay_in_their_directory() {
+    let dir = tempdir().expect("create tempdir");
+    let root = VdirPath::new(dir.path().to_string_lossy().into_owned());
+    let client = VdirClient::new(root.clone());
+
+    let contacts = root.join("contacts");
+    let work = root.join("work");
+    client
+        .create_collection(VdirCollection::from_path(contacts.clone()))
+        .expect("create contacts");
+    client
+        .create_collection(VdirCollection::from_path(work.clone()))
+        .expect("create work");
+
+    let (_, bob) = client
+        .store_item(
+            work.clone(),
+            Some(String::from("bob")),
+            VdirItemKind::Vcard,
+            b"BEGIN:VCARD\r\nEND:VCARD\r\n".to_vec(),
+        )
+        .expect("store bob");
+
+    client
+        .store_item(
+            contacts.clone(),
+            Some(String::from("../escaped")),
+            VdirItemKind::Vcard,
+            b"BEGIN:VCARD\r\nEND:VCARD\r\n".to_vec(),
+        )
+        .expect_err("store outside the collection");
+    assert!(!Path::new(root.join("escaped.vcf").as_str()).exists());
+
+    client
+        .delete_item(contacts.clone(), "../work/bob")
+        .expect_err("delete outside the collection");
+    assert!(Path::new(bob.as_str()).is_file());
+
+    client
+        .move_item(work.clone(), contacts.clone(), "../work/bob")
+        .expect_err("move through a foreign path");
+    assert!(Path::new(bob.as_str()).is_file());
+
+    client
+        .rename_collection(contacts.clone(), "work/nested")
+        .expect_err("rename outside the parent");
+    assert!(Path::new(contacts.as_str()).is_dir());
+    assert!(!Path::new(work.join("nested").as_str()).exists());
+}

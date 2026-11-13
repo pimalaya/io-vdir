@@ -7,6 +7,9 @@
 //! file at the final path is replaced. Use the same coroutine for
 //! create and update.
 //!
+//! A supplied id that is empty, or holds a NUL or a path separator,
+//! is refused before any request.
+//!
 //! # Example
 //!
 //! ```rust,no_run
@@ -55,7 +58,7 @@ use thiserror::Error;
 use crate::{
     coroutine::*,
     item::{VdirItemKind, build_paths},
-    path::VdirPath,
+    path::{VdirPath, is_stem},
 };
 
 /// Number of random bytes a fresh UUIDv4 id is built from.
@@ -68,6 +71,10 @@ pub enum VdirItemStoreError {
     /// request.
     #[error("Vdir item store failed: unexpected arg {0:?}")]
     UnexpectedArg(Option<VdirReply>),
+
+    /// The supplied id cannot name an item of the collection.
+    #[error("Vdir item store failed: invalid item id {0:?}")]
+    InvalidId(String),
 }
 
 /// Successful output of [`VdirItemStore`].
@@ -138,6 +145,10 @@ impl VdirCoroutine for VdirItemStore {
                 let contents = mem::take(contents);
 
                 match id.take() {
+                    Some(id) if !is_stem(&id) => {
+                        let err = VdirItemStoreError::InvalidId(id);
+                        VdirCoroutineState::Complete(Err(err))
+                    }
                     Some(id) => {
                         let (tmp_path, final_path) = build_paths(&collection, &id, kind);
                         let files = BTreeMap::from_iter([(tmp_path.clone(), contents)]);
@@ -166,11 +177,17 @@ impl VdirCoroutine for VdirItemStore {
                 },
                 Some(VdirReply::Random(bytes)),
             ) => {
+                let Some(seed) = bytes.first_chunk() else {
+                    let arg = Some(VdirReply::Random(bytes));
+                    let err = VdirItemStoreError::UnexpectedArg(arg);
+                    return VdirCoroutineState::Complete(Err(err));
+                };
+
                 let collection = mem::take(collection);
                 let kind = *kind;
                 let contents = mem::take(contents);
 
-                let id = uuid_v4(&bytes);
+                let id = uuid_v4(*seed);
                 let (tmp_path, final_path) = build_paths(&collection, &id, kind);
                 let files = BTreeMap::from_iter([(tmp_path.clone(), contents)]);
                 self.state = State::CreateFile {
@@ -248,8 +265,7 @@ impl fmt::Display for State {
 
 /// Formats 16 raw bytes as a canonical UUIDv4 string, stamping the
 /// RFC 4122 version (4) and variant (10x) bits.
-fn uuid_v4(bytes: &[u8]) -> String {
-    let mut bytes: [u8; UUID_LEN] = bytes[..UUID_LEN].try_into().unwrap_or([0u8; UUID_LEN]);
+fn uuid_v4(mut bytes: [u8; UUID_LEN]) -> String {
     bytes[6] = (bytes[6] & 0x0f) | 0x40;
     bytes[8] = (bytes[8] & 0x3f) | 0x80;
 
@@ -370,5 +386,42 @@ mod tests {
             state => panic!("expected Complete(Err), got {state:?}"),
         };
         assert!(matches!(err, VdirItemStoreError::UnexpectedArg(_)));
+    }
+
+    #[test]
+    fn short_random_reply_returns_error() {
+        let mut cor = VdirItemStore::new(
+            "root/contacts",
+            None,
+            VdirItemKind::Vcard,
+            b"x".to_vec(),
+            VdirItemStoreOptions::default(),
+        );
+        let _ = cor.resume(None);
+
+        let bytes = vec![0xabu8; UUID_LEN - 1];
+        let err = match cor.resume(Some(VdirReply::Random(bytes))) {
+            VdirCoroutineState::Complete(Err(err)) => err,
+            state => panic!("expected Complete(Err), got {state:?}"),
+        };
+        assert!(matches!(err, VdirItemStoreError::UnexpectedArg(_)));
+    }
+
+    #[test]
+    fn invalid_id_returns_error() {
+        for id in ["", "../work/alice", "a/b", "a\0b"] {
+            let mut cor = VdirItemStore::new(
+                "root/contacts",
+                Some(id.into()),
+                VdirItemKind::Vcard,
+                b"x".to_vec(),
+                VdirItemStoreOptions::default(),
+            );
+
+            match cor.resume(None) {
+                VdirCoroutineState::Complete(Err(VdirItemStoreError::InvalidId(_))) => {}
+                state => panic!("expected InvalidId for {id:?}, got {state:?}"),
+            }
+        }
     }
 }

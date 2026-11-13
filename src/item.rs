@@ -15,7 +15,7 @@ use core::hash::{Hash, Hasher};
 
 use alloc::vec::Vec;
 
-use crate::path::VdirPath;
+use crate::path::{VdirPath, is_stem};
 
 pub mod copy;
 pub mod delete;
@@ -69,12 +69,15 @@ impl VdirItemKind {
 
 /// Builds the `(tmp, final)` paths for item `id` of `kind` under
 /// `collection`. Bytes land on the first and are renamed onto the
-/// second, so the item is only ever enumerated whole.
+/// second, so the item is only ever enumerated whole. The caller
+/// checks `id` with [`is_stem`] first.
 pub(crate) fn build_paths(
     collection: &VdirPath,
     id: &str,
     kind: VdirItemKind,
 ) -> (VdirPath, VdirPath) {
+    debug_assert!(is_stem(id));
+
     let ext = kind.extension();
     let final_path = collection.join(&format!("{id}.{ext}"));
     let tmp_path = collection.join(&format!("{id}.{ext}.{TMP}"));
