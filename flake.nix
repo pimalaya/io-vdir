@@ -3,8 +3,7 @@
 
   inputs = {
     nixpkgs = {
-      # until crates.io fix fully backported
-      url = "github:nixos/nixpkgs/nixos-25.11";
+      url = "github:nixos/nixpkgs/nixos-26.05";
     };
     fenix = {
       url = "github:nix-community/fenix/monthly";
