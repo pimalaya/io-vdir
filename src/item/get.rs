@@ -1,11 +1,13 @@
 //! I/O-free coroutine fetching a Vdir item by its ID.
 //!
-//! Locates the item file via [`VdirItemLocate`], then reads its contents.
+//! Locates the item file via [`VdirItemLocate`], stats it, then reads
+//! its contents. The stat comes first, so an item rewritten in between
+//! carries a stale stat and a conditional store of it is refused.
 //!
 //! # Example
 //!
 //! ```rust,no_run
-//! use std::fs;
+//! use std::{collections::BTreeMap, fs};
 //!
 //! use io_vdir::{coroutine::*, item::get::*};
 //!
@@ -25,14 +27,27 @@
 //!                 .collect();
 //!             arg = Some(VdirReply::FileExists(map));
 //!         }
+//!         VdirCoroutineState::Yielded(VdirYield::WantsFileMeta(paths)) => {
+//!             let mut map = BTreeMap::new();
+//!             for path in paths {
+//!                 match fs::metadata(path.as_str()) {
+//!                     Ok(meta) if meta.is_file() => {
+//!                         // fill the mtime and the inode in real code
+//!                         let size = meta.len();
+//!                         map.insert(path, VdirFileMeta { size, ..Default::default() });
+//!                     }
+//!                     _ => {}
+//!                 }
+//!             }
+//!             arg = Some(VdirReply::FileMeta(map));
+//!         }
 //!         VdirCoroutineState::Yielded(VdirYield::WantsFileRead(paths)) => {
-//!             let map = paths
-//!                 .into_iter()
-//!                 .map(|p| {
-//!                     let bytes = fs::read(p.as_str()).unwrap_or_default();
-//!                     (p, bytes)
-//!                 })
-//!                 .collect();
+//!             let mut map = BTreeMap::new();
+//!             for path in paths {
+//!                 if let Ok(bytes) = fs::read(path.as_str()) {
+//!                     map.insert(path, bytes);
+//!                 }
+//!             }
 //!             arg = Some(VdirReply::FileRead(map));
 //!         }
 //!         VdirCoroutineState::Complete(Ok(item)) => break item,
@@ -68,6 +83,10 @@ pub enum VdirItemGetError {
     /// The inner locate coroutine failed.
     #[error(transparent)]
     Locate(#[from] VdirItemLocateError),
+
+    /// The driver could not stat or read the located item file.
+    #[error("Vdir item get failed: cannot read item file {0}")]
+    Unreadable(VdirPath),
 }
 
 /// Options for [`VdirItemGet::new`].
@@ -110,20 +129,38 @@ impl VdirCoroutine for VdirItemGet {
             (State::Locate(c), arg) => {
                 let out = vdir_try!(c, arg);
                 let paths = BTreeSet::from_iter([out.path.clone()]);
-                self.state = State::Read {
+                self.state = State::Stat {
                     path: out.path,
                     kind: out.kind,
                 };
-                VdirCoroutineState::Yielded(VdirYield::WantsFileRead(paths))
+                VdirCoroutineState::Yielded(VdirYield::WantsFileMeta(paths))
             }
-            (State::Read { path, kind }, Some(VdirReply::FileRead(mut map))) => {
+            (State::Stat { path, kind }, Some(VdirReply::FileMeta(metas))) => {
                 let path = mem::take(path);
                 let kind = *kind;
-                let contents = map.remove(&path).unwrap_or_default();
+
+                let Some(meta) = metas.get(&path).copied() else {
+                    let err = VdirItemGetError::Unreadable(path);
+                    return VdirCoroutineState::Complete(Err(err));
+                };
+
+                let paths = BTreeSet::from_iter([path.clone()]);
+                self.state = State::Read { path, kind, meta };
+                VdirCoroutineState::Yielded(VdirYield::WantsFileRead(paths))
+            }
+            (State::Read { path, kind, meta }, Some(VdirReply::FileRead(mut map))) => {
+                let path = mem::take(path);
+
+                let Some(contents) = map.remove(&path) else {
+                    let err = VdirItemGetError::Unreadable(path);
+                    return VdirCoroutineState::Complete(Err(err));
+                };
+
                 VdirCoroutineState::Complete(Ok(VdirItem {
                     path,
-                    kind,
+                    kind: *kind,
                     contents,
+                    meta: *meta,
                 }))
             }
             (_, arg) => {
@@ -137,13 +174,22 @@ impl VdirCoroutine for VdirItemGet {
 #[derive(Debug)]
 enum State {
     Locate(VdirItemLocate),
-    Read { path: VdirPath, kind: VdirItemKind },
+    Stat {
+        path: VdirPath,
+        kind: VdirItemKind,
+    },
+    Read {
+        path: VdirPath,
+        kind: VdirItemKind,
+        meta: VdirFileMeta,
+    },
 }
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Locate(_) => f.write_str("locate item"),
+            Self::Stat { .. } => f.write_str("stat item"),
             Self::Read { .. } => f.write_str("read item"),
         }
     }
@@ -170,6 +216,17 @@ mod tests {
         exists.insert(VdirPath::from("root/contacts/alice.ics"), false);
 
         let paths = match cor.resume(Some(VdirReply::FileExists(exists))) {
+            VdirCoroutineState::Yielded(VdirYield::WantsFileMeta(paths)) => paths,
+            state => panic!("expected WantsFileMeta, got {state:?}"),
+        };
+        assert!(paths.contains(&vcf));
+
+        let meta = VdirFileMeta {
+            size: 11,
+            ..Default::default()
+        };
+        let metas = BTreeMap::from_iter([(vcf.clone(), meta)]);
+        let paths = match cor.resume(Some(VdirReply::FileMeta(metas))) {
             VdirCoroutineState::Yielded(VdirYield::WantsFileRead(paths)) => paths,
             state => panic!("expected WantsFileRead, got {state:?}"),
         };
@@ -184,6 +241,26 @@ mod tests {
         assert_eq!(item.path, vcf);
         assert_eq!(item.kind, VdirItemKind::Vcard);
         assert_eq!(item.contents, b"BEGIN:VCARD");
+        assert_eq!(item.meta, meta);
+    }
+
+    #[test]
+    fn unread_file_returns_error() {
+        let mut cor = VdirItemGet::new("root/contacts", "alice", VdirItemGetOptions::default());
+        let _ = cor.resume(None);
+
+        let vcf = VdirPath::from("root/contacts/alice.vcf");
+        let exists = BTreeMap::from_iter([(vcf.clone(), true)]);
+        let _ = cor.resume(Some(VdirReply::FileExists(exists)));
+
+        let metas = BTreeMap::from_iter([(vcf.clone(), VdirFileMeta::default())]);
+        let _ = cor.resume(Some(VdirReply::FileMeta(metas)));
+
+        let err = match cor.resume(Some(VdirReply::FileRead(BTreeMap::new()))) {
+            VdirCoroutineState::Complete(Err(err)) => err,
+            state => panic!("expected Complete(Err), got {state:?}"),
+        };
+        assert!(matches!(err, VdirItemGetError::Unreadable(path) if path == vcf));
     }
 
     #[test]

@@ -1,8 +1,12 @@
-//! I/O-free coroutine listing every item inside a Vdir collection.
+//! I/O-free coroutine listing the items of a Vdir collection.
 //!
-//! Entries with a `.vcf` or `.ics` extension are considered items;
-//! anything else (metadata files, dotfiles, leftover temporaries) is
-//! skipped.
+//! Regular files named `<id>.vcf` or `<id>.ics` are items; anything
+//! else (metadata files, leftover temporaries, directories, dangling
+//! links, a bare `.vcf`) is skipped. The listing stats each item and
+//! reads none: [`VdirItemRead`] loads the bytes of the entries the
+//! caller picks, in batches of its choice.
+//!
+//! [`VdirItemRead`]: crate::item::read::VdirItemRead
 //!
 //! # Example
 //!
@@ -15,7 +19,7 @@
 //! let mut coroutine = VdirItemList::new("/tmp/vdir/contacts", opts);
 //! let mut arg = None;
 //!
-//! let items = loop {
+//! let entries = loop {
 //!     match coroutine.resume(arg.take()) {
 //!         VdirCoroutineState::Yielded(VdirYield::WantsDirRead(paths)) => {
 //!             let mut out = BTreeMap::new();
@@ -30,36 +34,43 @@
 //!             }
 //!             arg = Some(VdirReply::DirRead(out));
 //!         }
-//!         VdirCoroutineState::Yielded(VdirYield::WantsFileRead(paths)) => {
-//!             let map = paths
-//!                 .into_iter()
-//!                 .map(|p| {
-//!                     let bytes = fs::read(p.as_str()).unwrap_or_default();
-//!                     (p, bytes)
-//!                 })
-//!                 .collect();
-//!             arg = Some(VdirReply::FileRead(map));
+//!         VdirCoroutineState::Yielded(VdirYield::WantsFileMeta(paths)) => {
+//!             let mut out = BTreeMap::new();
+//!             for path in paths {
+//!                 match fs::metadata(path.as_str()) {
+//!                     Ok(meta) if meta.is_file() => {
+//!                         // fill the mtime and the inode in real code
+//!                         let size = meta.len();
+//!                         out.insert(path, VdirFileMeta { size, ..Default::default() });
+//!                     }
+//!                     _ => {}
+//!                 }
+//!             }
+//!             arg = Some(VdirReply::FileMeta(out));
 //!         }
-//!         VdirCoroutineState::Complete(Ok(items)) => break items,
+//!         VdirCoroutineState::Complete(Ok(entries)) => break entries,
 //!         VdirCoroutineState::Complete(Err(err)) => panic!("{err}"),
 //!         state => panic!("unexpected state {state:?}"),
 //!     }
 //! };
 //!
-//! println!("found {} items", items.len());
+//! println!("found {} items", entries.len());
 //! ```
 
 use core::{fmt, mem};
 
-use alloc::collections::{BTreeMap, BTreeSet};
+use alloc::{
+    collections::{BTreeMap, BTreeSet},
+    string::{String, ToString},
+};
 
 use log::trace;
 use thiserror::Error;
 
 use crate::{
     coroutine::*,
-    item::{VdirItem, VdirItemKind},
-    path::VdirPath,
+    item::{VdirItemEntry, VdirItemKind},
+    path::{VdirPath, is_stem},
 };
 
 /// Failure causes during a [`VdirItemList`] step.
@@ -75,7 +86,8 @@ pub enum VdirItemListError {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct VdirItemListOptions {}
 
-/// Lists every `.vcf` / `.ics` item inside a Vdir collection.
+/// Lists the `.vcf` / `.ics` items of a Vdir collection, bytes left
+/// unread.
 #[derive(Debug)]
 pub struct VdirItemList {
     state: State,
@@ -96,7 +108,7 @@ impl VdirItemList {
 
 impl VdirCoroutine for VdirItemList {
     type Yield = VdirYield;
-    type Return = Result<BTreeSet<VdirItem>, VdirItemListError>;
+    type Return = Result<BTreeSet<VdirItemEntry>, VdirItemListError>;
 
     fn resume(&mut self, arg: Option<VdirReply>) -> VdirCoroutineState<Self::Yield, Self::Return> {
         match (&mut self.state, arg) {
@@ -106,7 +118,7 @@ impl VdirCoroutine for VdirItemList {
                 VdirCoroutineState::Yielded(VdirYield::WantsDirRead(paths))
             }
             (State::ReadDir, Some(VdirReply::DirRead(entries))) => {
-                let mut kinds: BTreeMap<VdirPath, VdirItemKind> = BTreeMap::new();
+                let mut names = BTreeMap::new();
 
                 for paths in entries.into_values() {
                     for path in paths {
@@ -114,7 +126,7 @@ impl VdirCoroutine for VdirItemList {
                             continue;
                         };
 
-                        let Some((_, ext)) = name.rsplit_once('.') else {
+                        let Some((id, ext)) = name.rsplit_once('.') else {
                             continue;
                         };
 
@@ -122,32 +134,41 @@ impl VdirCoroutine for VdirItemList {
                             continue;
                         };
 
-                        kinds.insert(path, kind);
+                        if !is_stem(id) {
+                            continue;
+                        }
+
+                        let id = id.to_string();
+                        names.insert(path, (id, kind));
                     }
                 }
 
-                if kinds.is_empty() {
+                if names.is_empty() {
                     return VdirCoroutineState::Complete(Ok(BTreeSet::new()));
                 }
 
-                let probes: BTreeSet<VdirPath> = kinds.keys().cloned().collect();
-                self.state = State::ReadFiles { kinds };
-                VdirCoroutineState::Yielded(VdirYield::WantsFileRead(probes))
+                let probes = names.keys().cloned().collect();
+                self.state = State::Probe { names };
+                VdirCoroutineState::Yielded(VdirYield::WantsFileMeta(probes))
             }
-            (State::ReadFiles { kinds }, Some(VdirReply::FileRead(mut contents))) => {
-                let mut items = BTreeSet::new();
+            (State::Probe { names }, Some(VdirReply::FileMeta(metas))) => {
+                let mut entries = BTreeSet::new();
 
-                for (path, kind) in mem::take(kinds) {
-                    let bytes = contents.remove(&path).unwrap_or_default();
-                    items.insert(VdirItem {
-                        path,
+                for (path, (id, kind)) in mem::take(names) {
+                    let Some(meta) = metas.get(&path).copied() else {
+                        continue;
+                    };
+
+                    entries.insert(VdirItemEntry {
+                        id,
                         kind,
-                        contents: bytes,
+                        path,
+                        meta,
                     });
                 }
 
-                trace!("listed {} items", items.len());
-                VdirCoroutineState::Complete(Ok(items))
+                trace!("listed {} items", entries.len());
+                VdirCoroutineState::Complete(Ok(entries))
             }
             (_, arg) => {
                 let err = VdirItemListError::UnexpectedArg(arg);
@@ -161,8 +182,8 @@ impl VdirCoroutine for VdirItemList {
 enum State {
     Start(VdirPath),
     ReadDir,
-    ReadFiles {
-        kinds: BTreeMap<VdirPath, VdirItemKind>,
+    Probe {
+        names: BTreeMap<VdirPath, (String, VdirItemKind)>,
     },
 }
 
@@ -171,7 +192,7 @@ impl fmt::Display for State {
         match self {
             Self::Start(_) => f.write_str("start"),
             Self::ReadDir => f.write_str("read collection dir"),
-            Self::ReadFiles { .. } => f.write_str("read items"),
+            Self::Probe { .. } => f.write_str("probe items"),
         }
     }
 }
@@ -181,38 +202,83 @@ mod tests {
     use super::*;
 
     #[test]
-    fn reads_only_vcf_and_ics_entries() {
+    fn lists_vcf_and_ics_files_without_reading_them() {
         let mut cor = VdirItemList::new("root/contacts", VdirItemListOptions::default());
 
         let paths = expect_wants_dir_read(&mut cor);
         assert!(paths.contains(&VdirPath::from("root/contacts")));
 
         let vcf = VdirPath::from("root/contacts/alice.vcf");
-        let mut entries = BTreeMap::new();
-        entries.insert(
-            VdirPath::from("root/contacts"),
-            BTreeSet::from_iter([
+        let ics = VdirPath::from("root/contacts/.bob.ics");
+        let probes = expect_wants_file_meta(
+            &mut cor,
+            [
                 vcf.clone(),
+                ics.clone(),
                 VdirPath::from("root/contacts/displayname"),
-                VdirPath::from("root/contacts/alice.vcf.tmp"),
-            ]),
+                VdirPath::from("root/contacts/alice.vcf.0011223344556677.tmp"),
+            ],
         );
+        assert_eq!(probes, BTreeSet::from_iter([vcf.clone(), ics.clone()]));
 
-        let probes = match cor.resume(Some(VdirReply::DirRead(entries))) {
-            VdirCoroutineState::Yielded(VdirYield::WantsFileRead(probes)) => probes,
-            state => panic!("expected WantsFileRead, got {state:?}"),
+        let meta = VdirFileMeta {
+            size: 11,
+            ..Default::default()
         };
-        assert_eq!(probes.len(), 1);
-        assert!(probes.contains(&vcf));
-
-        let mut contents = BTreeMap::new();
-        contents.insert(vcf.clone(), b"BEGIN:VCARD".to_vec());
-        let items = match cor.resume(Some(VdirReply::FileRead(contents))) {
-            VdirCoroutineState::Complete(Ok(items)) => items,
+        let metas = BTreeMap::from_iter([(vcf.clone(), meta), (ics.clone(), meta)]);
+        let entries = match cor.resume(Some(VdirReply::FileMeta(metas))) {
+            VdirCoroutineState::Complete(Ok(entries)) => entries,
             state => panic!("expected Complete(Ok), got {state:?}"),
         };
-        assert_eq!(items.len(), 1);
-        assert_eq!(items.iter().next().unwrap().kind, VdirItemKind::Vcard);
+
+        let bob = VdirItemEntry {
+            id: ".bob".into(),
+            kind: VdirItemKind::Ical,
+            path: ics,
+            meta,
+        };
+        let alice = VdirItemEntry {
+            id: "alice".into(),
+            kind: VdirItemKind::Vcard,
+            path: vcf,
+            meta,
+        };
+        assert_eq!(entries, BTreeSet::from_iter([bob, alice]));
+    }
+
+    #[test]
+    fn bare_extension_is_not_an_item() {
+        let mut cor = VdirItemList::new("root/contacts", VdirItemListOptions::default());
+        let _ = expect_wants_dir_read(&mut cor);
+
+        let vcf = VdirPath::from("root/contacts/alice.vcf");
+        let probes = expect_wants_file_meta(
+            &mut cor,
+            [
+                vcf.clone(),
+                VdirPath::from("root/contacts/.vcf"),
+                VdirPath::from("root/contacts/.ics"),
+            ],
+        );
+        assert_eq!(probes, BTreeSet::from_iter([vcf]));
+    }
+
+    #[test]
+    fn entry_that_is_not_a_file_is_skipped() {
+        let mut cor = VdirItemList::new("root/contacts", VdirItemListOptions::default());
+        let _ = expect_wants_dir_read(&mut cor);
+
+        let vcf = VdirPath::from("root/contacts/alice.vcf");
+        let dir = VdirPath::from("root/contacts/folder.ics");
+        let _ = expect_wants_file_meta(&mut cor, [vcf.clone(), dir]);
+
+        let metas = BTreeMap::from_iter([(vcf.clone(), VdirFileMeta::default())]);
+        let entries = match cor.resume(Some(VdirReply::FileMeta(metas))) {
+            VdirCoroutineState::Complete(Ok(entries)) => entries,
+            state => panic!("expected Complete(Ok), got {state:?}"),
+        };
+        let paths: BTreeSet<VdirPath> = entries.into_iter().map(|entry| entry.path).collect();
+        assert_eq!(paths, BTreeSet::from_iter([vcf]));
     }
 
     #[test]
@@ -245,6 +311,19 @@ mod tests {
         match cor.resume(None) {
             VdirCoroutineState::Yielded(VdirYield::WantsDirRead(paths)) => paths,
             state => panic!("expected WantsDirRead, got {state:?}"),
+        }
+    }
+
+    fn expect_wants_file_meta(
+        cor: &mut VdirItemList,
+        names: impl IntoIterator<Item = VdirPath>,
+    ) -> BTreeSet<VdirPath> {
+        let names = BTreeSet::from_iter(names);
+        let entries = BTreeMap::from_iter([(VdirPath::from("root/contacts"), names)]);
+
+        match cor.resume(Some(VdirReply::DirRead(entries))) {
+            VdirCoroutineState::Yielded(VdirYield::WantsFileMeta(paths)) => paths,
+            state => panic!("expected WantsFileMeta, got {state:?}"),
         }
     }
 }

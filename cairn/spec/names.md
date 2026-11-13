@@ -28,7 +28,7 @@ The item extension is always appended to an id, so what passes can only name an 
 
 ### Requirement: The check refuses no id a listing returns
 
-The id of an item returned by a listing SHALL pass the check, a dot-prefixed file included. A listing SHALL NOT hide an item to make that hold: a reader comparing two listings would take the hidden item for a deleted one.
+The id of an item returned by a listing SHALL pass the check, a dot-prefixed file included, and a lookup of that id SHALL probe the listed path. A listing SHALL NOT hide an item to make that hold: a reader comparing two listings would take the hidden item for a deleted one.
 
 #### Scenario: A dot-prefixed item
 

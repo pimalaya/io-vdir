@@ -26,8 +26,9 @@
 //! the [`collection::VdirCollection`] handle and one coroutine per
 //! directory operation (create, delete, list, rename, update).
 //! [`item`] owns the [`item::VdirItem`] handle, its
-//! [`item::VdirItemKind`] and one coroutine per item operation
-//! (store, get, list, locate, copy, move, delete). [`path`] holds the
+//! [`item::VdirItemKind`], the [`item::VdirItemEntry`] a listing
+//! returns and one coroutine per item operation (store, get, list,
+//! read, locate, copy, move, delete). [`path`] holds the
 //! forward-slash [`path::VdirPath`] newtype shared across both.
 //!
 //! ## Encoding

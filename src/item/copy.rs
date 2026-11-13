@@ -3,8 +3,9 @@
 //! Locates the source item via [`VdirItemLocate`], then copies it into the
 //! target collection keeping the same id and extension.
 //!
-//! The bytes land on the target's `.tmp` sibling and one rename
-//! publishes them, as [`VdirItemStore`] writes its own. Keeping the id
+//! The bytes land on a `.tmp` sibling of the target, named from
+//! random bytes, and one rename publishes them, as
+//! [`VdirItemStore`] writes its own. Keeping the id
 //! means the target name may already hold an item, and staging is what
 //! keeps that item whole until the copy is complete: it is replaced in
 //! one step or not at all.
@@ -34,6 +35,10 @@
 //!                 .collect();
 //!             arg = Some(VdirReply::FileExists(map));
 //!         }
+//!         VdirCoroutineState::Yielded(VdirYield::WantsRandom { len }) => {
+//!             let bytes = vec![0u8; len]; // fill via the OS RNG in real code
+//!             arg = Some(VdirReply::Random(bytes));
+//!         }
 //!         VdirCoroutineState::Yielded(VdirYield::WantsCopy(pairs)) => {
 //!             for (from, to) in pairs {
 //!                 fs::copy(from.as_str(), to.as_str()).unwrap();
@@ -61,7 +66,7 @@ use thiserror::Error;
 
 use crate::{
     coroutine::*,
-    item::{build_paths, locate::*},
+    item::{TMP_LEN, build_paths, locate::*},
     path::VdirPath,
     vdir_try,
 };
@@ -122,8 +127,22 @@ impl VdirCoroutine for VdirItemCopy {
         match (&mut self.state, arg) {
             (State::Locate { target, id, inner }, arg) => {
                 let out = vdir_try!(inner, arg);
-                let (tmp_path, final_path) = build_paths(target, id, out.kind);
-                let pairs = vec![(out.path, tmp_path.clone())];
+                self.state = State::ReadRandom {
+                    target: mem::take(target),
+                    id: mem::take(id),
+                    source: out,
+                };
+                VdirCoroutineState::Yielded(VdirYield::WantsRandom { len: TMP_LEN })
+            }
+            (State::ReadRandom { target, id, source }, Some(VdirReply::Random(bytes))) => {
+                let Some(seed) = bytes.first_chunk() else {
+                    let arg = Some(VdirReply::Random(bytes));
+                    let err = VdirItemCopyError::UnexpectedArg(arg);
+                    return VdirCoroutineState::Complete(Err(err));
+                };
+
+                let (tmp_path, final_path) = build_paths(target, id, source.kind, *seed);
+                let pairs = vec![(mem::take(&mut source.path), tmp_path.clone())];
                 self.state = State::Copy {
                     tmp_path,
                     final_path,
@@ -157,6 +176,11 @@ enum State {
         id: String,
         inner: VdirItemLocate,
     },
+    ReadRandom {
+        target: VdirPath,
+        id: String,
+        source: VdirItemLocateOutput,
+    },
     Copy {
         tmp_path: VdirPath,
         final_path: VdirPath,
@@ -168,6 +192,7 @@ impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Locate { .. } => f.write_str("locate source item"),
+            Self::ReadRandom { .. } => f.write_str("read random"),
             Self::Copy { .. } => f.write_str("copy into tmp"),
             Self::Rename => f.write_str("rename into place"),
         }
@@ -195,10 +220,18 @@ mod tests {
         exists.insert(vcf.clone(), true);
         exists.insert(VdirPath::from("root/a/alice.ics"), false);
 
+        match cor.resume(Some(VdirReply::FileExists(exists))) {
+            VdirCoroutineState::Yielded(VdirYield::WantsRandom { len }) => {
+                assert_eq!(len, TMP_LEN)
+            }
+            state => panic!("expected WantsRandom, got {state:?}"),
+        }
+
         // The bytes land on the tmp sibling, never on the name the
         // target collection is enumerated by.
-        let staged = VdirPath::from("root/b/alice.vcf.tmp");
-        let pairs = match cor.resume(Some(VdirReply::FileExists(exists))) {
+        let staged = VdirPath::from("root/b/alice.vcf.abababababababab.tmp");
+        let bytes = vec![0xabu8; TMP_LEN];
+        let pairs = match cor.resume(Some(VdirReply::Random(bytes))) {
             VdirCoroutineState::Yielded(VdirYield::WantsCopy(pairs)) => pairs,
             state => panic!("expected WantsCopy, got {state:?}"),
         };

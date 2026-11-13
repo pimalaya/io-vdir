@@ -12,7 +12,7 @@ use alloc::{
     vec::Vec,
 };
 
-use std::{fs, io};
+use std::{fs, io, time::UNIX_EPOCH};
 
 use getrandom::fill;
 use log::trace;
@@ -22,7 +22,8 @@ use crate::{
     collection::{VdirCollection, create::*, delete::*, list::*, rename::*, update::*},
     coroutine::*,
     item::{
-        VdirItem, VdirItemKind, copy::*, delete::*, get::*, list::*, locate::*, r#move::*, store::*,
+        VdirItem, VdirItemEntry, VdirItemKind, copy::*, delete::*, get::*, list::*, locate::*,
+        r#move::*, read::*, store::*,
     },
     path::VdirPath,
 };
@@ -54,6 +55,9 @@ pub enum VdirClientError {
     /// An item list coroutine failed.
     #[error(transparent)]
     VdirItemList(#[from] VdirItemListError),
+    /// An item read coroutine failed.
+    #[error(transparent)]
+    VdirItemRead(#[from] VdirItemReadError),
     /// An item store coroutine failed.
     #[error(transparent)]
     VdirItemStore(#[from] VdirItemStoreError),
@@ -70,6 +74,14 @@ pub enum VdirClientError {
     /// request.
     #[error(transparent)]
     Io(#[from] io::Error),
+    /// A file a coroutine asked for could not be read.
+    #[error("Failed to read file {path}: {err}")]
+    FileRead {
+        /// Path of the file.
+        path: VdirPath,
+        /// Error the read failed with.
+        err: io::Error,
+    },
     /// The system entropy source failed while minting a new item id.
     #[error("Failed to gather randomness for new item id: {0}")]
     Random(getrandom::Error),
@@ -96,7 +108,24 @@ impl VdirClient {
     /// Drives any standard-shape coroutine (`Yield = VdirYield`,
     /// `Return = Result<Output, Error>`) against the local filesystem
     /// until it terminates.
-    pub fn run<C, T, E>(&self, mut coroutine: C) -> Result<T, VdirClientError>
+    ///
+    /// A file that cannot be read fails the run:
+    /// [`Self::read_readable_items`] is the tolerant path.
+    pub fn run<C, T, E>(&self, coroutine: C) -> Result<T, VdirClientError>
+    where
+        C: VdirCoroutine<Yield = VdirYield, Return = Result<T, E>>,
+        VdirClientError: From<E>,
+    {
+        self.run_reading(coroutine, None)
+    }
+
+    /// Runs `coroutine`. With `unread`, a file that cannot be read is
+    /// left out of the reply and recorded there with its error.
+    fn run_reading<C, T, E>(
+        &self,
+        mut coroutine: C,
+        mut unread: Option<&mut BTreeMap<VdirPath, io::Error>>,
+    ) -> Result<T, VdirClientError>
     where
         C: VdirCoroutine<Yield = VdirYield, Return = Result<T, E>>,
         VdirClientError: From<E>,
@@ -121,8 +150,12 @@ impl VdirClient {
                 VdirCoroutineState::Yielded(VdirYield::WantsDirRead(paths)) => {
                     arg = Some(VdirReply::DirRead(read_dirs(paths)?));
                 }
+                VdirCoroutineState::Yielded(VdirYield::WantsFileMeta(paths)) => {
+                    arg = Some(VdirReply::FileMeta(file_metas(paths)));
+                }
                 VdirCoroutineState::Yielded(VdirYield::WantsFileRead(paths)) => {
-                    arg = Some(VdirReply::FileRead(read_files(paths)?));
+                    let contents = read_files(paths, unread.as_deref_mut())?;
+                    arg = Some(VdirReply::FileRead(contents));
                 }
                 VdirCoroutineState::Yielded(VdirYield::WantsFileCreate(files)) => {
                     write_files(files)?;
@@ -231,16 +264,86 @@ impl VdirClient {
         ))
     }
 
-    /// Runs [`VdirItemList`]: scans `collection` and returns every
-    /// `.vcf`/`.ics` entry, contents included.
+    /// Runs [`VdirItemList`] then [`VdirItemRead`]: returns every
+    /// `.vcf`/`.ics` item of `collection`, contents included.
+    ///
+    /// The whole collection is loaded at once, and one item that
+    /// cannot be read fails the listing: see [`Self::read_items`].
     pub fn list_items(
         &self,
         collection: impl Into<VdirPath>,
     ) -> Result<BTreeSet<VdirItem>, VdirClientError> {
+        let entries = self.list_item_entries(collection)?;
+        self.read_items(entries)
+    }
+
+    /// Runs [`VdirItemList`] then [`VdirItemRead`]: returns the items
+    /// of `collection` that can be read, beside the entries that
+    /// cannot with the error each read failed with.
+    pub fn list_readable_items(
+        &self,
+        collection: impl Into<VdirPath>,
+    ) -> Result<(BTreeSet<VdirItem>, BTreeMap<VdirItemEntry, io::Error>), VdirClientError> {
+        let entries = self.list_item_entries(collection)?;
+        self.read_readable_items(entries)
+    }
+
+    /// Runs [`VdirItemList`]: names every `.vcf`/`.ics` item of
+    /// `collection` with its stat, bytes left unread.
+    pub fn list_item_entries(
+        &self,
+        collection: impl Into<VdirPath>,
+    ) -> Result<BTreeSet<VdirItemEntry>, VdirClientError> {
         self.run(VdirItemList::new(
             collection,
             VdirItemListOptions::default(),
         ))
+    }
+
+    /// Runs [`VdirItemRead`]: reads the bytes of `entries` in one
+    /// batch.
+    ///
+    /// An entry that cannot be read fails the batch, so a caller
+    /// never takes it for a deleted item. An entry whose file is gone
+    /// since the listing is the exception, and is left out.
+    pub fn read_items(
+        &self,
+        entries: impl IntoIterator<Item = VdirItemEntry>,
+    ) -> Result<BTreeSet<VdirItem>, VdirClientError> {
+        let (items, unreadable) = self.read_readable_items(entries)?;
+
+        for (entry, err) in unreadable {
+            if err.kind() != io::ErrorKind::NotFound {
+                let path = entry.path;
+                return Err(VdirClientError::FileRead { path, err });
+            }
+
+            trace!("skip vanished item {}", entry.path);
+        }
+
+        Ok(items)
+    }
+
+    /// Runs [`VdirItemRead`]: reads the bytes of `entries` in one
+    /// batch, returning the items beside the entries that cannot be
+    /// read with the error each read failed with.
+    pub fn read_readable_items(
+        &self,
+        entries: impl IntoIterator<Item = VdirItemEntry>,
+    ) -> Result<(BTreeSet<VdirItem>, BTreeMap<VdirItemEntry, io::Error>), VdirClientError> {
+        let mut unread = BTreeMap::new();
+        let coroutine = VdirItemRead::new(entries, VdirItemReadOptions::default());
+        let out = self.run_reading(coroutine, Some(&mut unread))?;
+
+        let mut unreadable = BTreeMap::new();
+
+        for entry in out.unreadable {
+            let err = unread.remove(&entry.path);
+            let err = err.unwrap_or_else(|| io::ErrorKind::Other.into());
+            unreadable.insert(entry, err);
+        }
+
+        Ok((out.items, unreadable))
     }
 
     /// Runs [`VdirItemStore`]: writes `contents` as a new (or updated) item
@@ -248,7 +351,9 @@ impl VdirClient {
     /// final on-disk path.
     ///
     /// When `id` is `None`, a fresh UUIDv4 is generated from the system
-    /// entropy source.
+    /// entropy source. An existing item is replaced: pass a
+    /// [`VdirItemStore`] built with another [`VdirItemStoreMode`] to
+    /// [`Self::run`] for a conditional store.
     pub fn store_item(
         &self,
         collection: impl Into<VdirPath>,
@@ -387,16 +492,65 @@ fn read_dirs(
     Ok(entries)
 }
 
-fn read_files(paths: BTreeSet<VdirPath>) -> Result<BTreeMap<VdirPath, Vec<u8>>, io::Error> {
+fn read_files(
+    paths: BTreeSet<VdirPath>,
+    mut unread: Option<&mut BTreeMap<VdirPath, io::Error>>,
+) -> Result<BTreeMap<VdirPath, Vec<u8>>, VdirClientError> {
     let mut contents = BTreeMap::new();
 
     for path in paths {
         trace!("read_file {path}");
-        let bytes = fs::read(path.as_str())?;
-        contents.insert(path, bytes);
+
+        match (fs::read(path.as_str()), &mut unread) {
+            (Ok(bytes), _) => {
+                contents.insert(path, bytes);
+            }
+            (Err(err), Some(unread)) => {
+                trace!("read_file {path} failed: {err}");
+                unread.insert(path, err);
+            }
+            (Err(err), None) => return Err(VdirClientError::FileRead { path, err }),
+        }
     }
 
     Ok(contents)
+}
+
+fn file_metas(paths: BTreeSet<VdirPath>) -> BTreeMap<VdirPath, VdirFileMeta> {
+    let mut out = BTreeMap::new();
+
+    for path in paths {
+        let meta = match fs::metadata(path.as_str()) {
+            Ok(meta) if meta.is_file() => meta,
+            _ => {
+                trace!("file_meta {path}: not a file");
+                continue;
+            }
+        };
+
+        let mtime = meta.modified().map(|time| time.duration_since(UNIX_EPOCH));
+        let (mtime_secs, mtime_nanos) = match mtime {
+            Ok(Ok(mtime)) => (mtime.as_secs() as i64, mtime.subsec_nanos()),
+            _ => (0, 0),
+        };
+
+        #[cfg(unix)]
+        let inode = std::os::unix::fs::MetadataExt::ino(&meta);
+        #[cfg(not(unix))]
+        let inode = 0;
+
+        let meta = VdirFileMeta {
+            size: meta.len(),
+            mtime_secs,
+            mtime_nanos,
+            inode,
+        };
+
+        trace!("file_meta {path}: {meta:?}");
+        out.insert(path, meta);
+    }
+
+    out
 }
 
 fn rename_paths(pairs: Vec<(VdirPath, VdirPath)>) -> Result<(), io::Error> {

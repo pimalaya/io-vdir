@@ -14,6 +14,10 @@ A coroutine resumed with a reply that does not answer its pending request SHALL 
 
 #### Scenario: A short random reply
 
-- GIVEN a store minting an id, waiting on 16 random bytes
-- WHEN the driver feeds back 15
+- GIVEN a store minting an id, waiting on 24 random bytes
+- WHEN the driver feeds back 23
 - THEN the store completes with an unexpected argument error
+
+### Requirement: What the driver could not serve is left out of the reply
+
+A driver that cannot read a file SHALL either fail its run or leave the file out of the read reply, and SHALL NOT answer with empty bytes. It SHALL leave out of a stat reply a path that is not a regular file. The coroutine decides what a missing answer means: a listing skips the entry, a batch read reports it, a read by id fails. The std client leaves a file out only in its two tolerant read methods.

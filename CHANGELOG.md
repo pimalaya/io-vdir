@@ -7,7 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Added I/O-free `VdirItemRead` coroutine.
+
+  It reads the batch of listed entries it is handed in one request and returns the items beside the entries that could not be read.
+
+- Added `VdirItemEntry`, an item as a listing names it: id, kind, path and stat, without its bytes.
+
+- Added `VdirFileMeta` (size, modification time, inode) with the `VdirYield::WantsFileMeta` request and its `VdirReply::FileMeta` reply.
+
+  **Breaking** for a hand-written driver: a new request to answer, leaving out any path that is not a regular file.
+
+- Added `VdirItemStoreMode` and the `VdirItemStoreOptions::mode` field: `Replace` (the default), `IfAbsent` and `IfUnchanged`.
+
+  A conditional store stats the item right before its rename and fails with the new `VdirItemStoreError::Exists` or `VdirItemStoreError::Changed`, removing its temporary file. The check is not atomic.
+
+- Added the `VdirItem::meta` field, the stat taken before the bytes were read.
+
+  **Breaking**: a `VdirItem` struct literal needs the field.
+
+- Added `VdirClient::list_item_entries`.
+
+- Added `VdirClient::read_items`.
+
+  It reads a batch of listed entries and fails when one cannot be read, leaving out only an entry whose file is gone since the listing.
+
+- Added `VdirClient::read_readable_items`.
+
+  It returns the items it could read beside every entry it could not, with the error each read failed with.
+
+- Added `VdirClient::list_readable_items`, the same over a whole collection.
+
+- Added `VdirClientError::FileRead`, naming the file a run could not read.
+
+### Changed
+
+- Changed `VdirItemList` to return `VdirItemEntry` values and read no item.
+
+  **Breaking**: it stats the candidates through `WantsFileMeta` where it read them through `WantsFileRead`. `VdirClient::list_items` still returns the items, contents included.
+
+- Changed `VdirItemStore` and `VdirItemCopy` to stage on `<id>.<ext>.<random>.tmp`.
+
+  **Breaking** for a hand-written driver: a store always requests random bytes (8, or 24 when it mints the id) and a copy requests 8.
+
+- Changed `VdirItemGet` to stat the item before reading it.
+
+  **Breaking**: one more request, and a new `VdirItemGetError::Unreadable` where a file missing from the reply was returned as empty bytes.
+
+- Changed the std client to fail a run on a file it cannot read with `VdirClientError::FileRead` where it returned `VdirClientError::Io`.
+
+  **Breaking**: `VdirClientError` gained the `FileRead` and `VdirItemRead` variants.
+
+- Changed `VdirClient::list_items` to leave out an item removed between its listing and its read, where it failed.
+
+  It still fails when a listed item cannot be read for any other reason.
+
+### Removed
+
+- Removed the `From<(VdirPath, VdirItemKind, Vec<u8>)>` implementation of `VdirItem`, which cannot supply a stat.
+
 ### Fixed
+
+- Fixed an item listing failing on a directory or a dangling link named like an item: only regular files are listed.
+
+- Fixed a file named exactly .vcf or .ics being listed under an id no lookup could find: it is not an item.
+
+- Fixed two concurrent stores or copies of one id sharing one temporary file.
 
 - Fixed item ids reaching paths unchecked.
 
@@ -21,7 +87,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   **Breaking**: `VdirCollectionRenameError` gained an `InvalidName` variant.
 
-- Fixed `VdirItemStore` panicking on a random reply shorter than 16 bytes: it completes with `UnexpectedArg`.
+- Fixed `VdirItemStore` panicking on a random reply shorter than requested: it completes with `UnexpectedArg`.
 
 ## [0.2.0] - 2026-08-24
 

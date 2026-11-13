@@ -8,9 +8,9 @@
 //! io-vdir is filesystem-flavoured, so every coroutine in the crate
 //! picks the standard [`VdirYield`] directly: it gathers every
 //! filesystem primitive the crate emits, namely directory create /
-//! remove / read / exists, file create / read / exists / remove, path
-//! rename / copy, plus the random bytes input needed to mint new item
-//! identifiers.
+//! remove / read / exists, file create / read / exists / stat /
+//! remove, path rename / copy, plus the random bytes input needed to
+//! mint new item identifiers and temporary names.
 //!
 //! [`VdirClient::run`] drives any standard-Yield coroutine to
 //! completion against the local filesystem.
@@ -86,6 +86,10 @@ pub enum VdirYield {
     /// [`VdirReply::DirRead`].
     WantsDirRead(BTreeSet<VdirPath>),
 
+    /// Driver must stat each path and feed back
+    /// [`VdirReply::FileMeta`].
+    WantsFileMeta(BTreeSet<VdirPath>),
+
     /// Driver must read each file's bytes and feed back
     /// [`VdirReply::FileRead`].
     WantsFileRead(BTreeSet<VdirPath>),
@@ -133,7 +137,12 @@ pub enum VdirReply {
     /// Reply to [`VdirYield::WantsDirRead`].
     DirRead(BTreeMap<VdirPath, BTreeSet<VdirPath>>),
 
-    /// Reply to [`VdirYield::WantsFileRead`].
+    /// Reply to [`VdirYield::WantsFileMeta`]. A path that is not a
+    /// regular file is left out.
+    FileMeta(BTreeMap<VdirPath, VdirFileMeta>),
+
+    /// Reply to [`VdirYield::WantsFileRead`]. A file that could not
+    /// be read is left out.
     FileRead(BTreeMap<VdirPath, Vec<u8>>),
 
     /// Acknowledgement of [`VdirYield::WantsFileCreate`].
@@ -153,6 +162,21 @@ pub enum VdirReply {
 
     /// Acknowledgement of [`VdirYield::WantsCopy`].
     Copy,
+}
+
+/// What a stat tells about a file: enough to tell an unchanged file
+/// from a rewritten one.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct VdirFileMeta {
+    /// Size in bytes.
+    pub size: u64,
+    /// Modification time, whole seconds since the Unix epoch.
+    pub mtime_secs: i64,
+    /// Modification time, sub-second remainder in nanoseconds.
+    pub mtime_nanos: u32,
+    /// Inode number, 0 where the platform has none.
+    pub inode: u64,
 }
 
 /// Coroutine `?`: forwards `Yielded` (via `Into`), short-circuits on

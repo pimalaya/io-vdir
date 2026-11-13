@@ -1,6 +1,7 @@
-//! Vdir items: the [`VdirItem`] handle and its [`VdirItemKind`], plus
-//! the I/O-free coroutines for the item lifecycle (store, get, list,
-//! locate, copy, move, delete).
+//! Vdir items: the [`VdirItem`] handle, its [`VdirItemKind`] and the
+//! [`VdirItemEntry`] a listing names it by, plus the I/O-free
+//! coroutines for the item lifecycle (store, get, list, read, locate,
+//! copy, move, delete).
 //!
 //! An item is a single vCard ([RFC 6350]) or iCalendar ([RFC 5545])
 //! file, as laid out by the [vdir specification]. The coroutine
@@ -13,9 +14,12 @@
 
 use core::hash::{Hash, Hasher};
 
-use alloc::vec::Vec;
+use alloc::{string::String, vec::Vec};
 
-use crate::path::{VdirPath, is_stem};
+use crate::{
+    coroutine::VdirFileMeta,
+    path::{VdirPath, is_stem},
+};
 
 pub mod copy;
 pub mod delete;
@@ -23,6 +27,7 @@ pub mod get;
 pub mod list;
 pub mod locate;
 pub mod r#move;
+pub mod read;
 pub mod store;
 
 /// File extension of vCard items.
@@ -34,6 +39,9 @@ pub(crate) const ICS: &str = "ics";
 /// Temporary file extension used while atomically replacing an item
 /// or a metadata file.
 pub(crate) const TMP: &str = "tmp";
+
+/// Number of random bytes an item's temporary file name is built from.
+pub(crate) const TMP_LEN: usize = 8;
 
 /// Kind of a Vdir item.
 ///
@@ -67,23 +75,6 @@ impl VdirItemKind {
     }
 }
 
-/// Builds the `(tmp, final)` paths for item `id` of `kind` under
-/// `collection`. Bytes land on the first and are renamed onto the
-/// second, so the item is only ever enumerated whole. The caller
-/// checks `id` with [`is_stem`] first.
-pub(crate) fn build_paths(
-    collection: &VdirPath,
-    id: &str,
-    kind: VdirItemKind,
-) -> (VdirPath, VdirPath) {
-    debug_assert!(is_stem(id));
-
-    let ext = kind.extension();
-    let final_path = collection.join(&format!("{id}.{ext}"));
-    let tmp_path = collection.join(&format!("{id}.{ext}.{TMP}"));
-    (tmp_path, final_path)
-}
-
 /// A Vdir collection's item.
 ///
 /// Carries the on-disk path, the parsed kind (from the file
@@ -99,6 +90,8 @@ pub struct VdirItem {
     pub kind: VdirItemKind,
     /// Raw file bytes.
     pub contents: Vec<u8>,
+    /// Stat of the item file, taken before its bytes were read.
+    pub meta: VdirFileMeta,
 }
 
 impl VdirItem {
@@ -131,12 +124,49 @@ impl AsRef<VdirPath> for VdirItem {
     }
 }
 
-impl From<(VdirPath, VdirItemKind, Vec<u8>)> for VdirItem {
-    fn from((path, kind, contents): (VdirPath, VdirItemKind, Vec<u8>)) -> Self {
-        Self {
-            path,
-            kind,
-            contents,
-        }
+/// A Vdir item as a listing names it, without its bytes.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct VdirItemEntry {
+    /// Id of the item: its file stem.
+    pub id: String,
+    /// Kind of the item, derived from the file extension.
+    pub kind: VdirItemKind,
+    /// On-disk path of the item file.
+    pub path: VdirPath,
+    /// Stat of the item file when it was listed.
+    pub meta: VdirFileMeta,
+}
+
+/// Builds the `(tmp, final)` paths for item `id` of `kind` under
+/// `collection`. Bytes land on the first, named after `seed`, and are
+/// renamed onto the second, so the item is only ever enumerated
+/// whole. The caller checks `id` with [`is_stem`] first.
+pub(crate) fn build_paths(
+    collection: &VdirPath,
+    id: &str,
+    kind: VdirItemKind,
+    seed: [u8; TMP_LEN],
+) -> (VdirPath, VdirPath) {
+    debug_assert!(is_stem(id));
+
+    let ext = kind.extension();
+    let final_path = collection.join(&format!("{id}.{ext}"));
+
+    let mut tmp_name = format!("{id}.{ext}.");
+    push_hex(&mut tmp_name, &seed);
+    tmp_name.push('.');
+    tmp_name.push_str(TMP);
+
+    (collection.join(&tmp_name), final_path)
+}
+
+/// Appends `bytes` to `out` as lowercase hexadecimal digits.
+pub(crate) fn push_hex(out: &mut String, bytes: &[u8]) {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+
+    for byte in bytes {
+        out.push(DIGITS[usize::from(byte >> 4)] as char);
+        out.push(DIGITS[usize::from(byte & 0x0f)] as char);
     }
 }

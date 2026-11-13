@@ -24,7 +24,7 @@ This library is composed of 2 feature-gated layers:
 - **I/O-free core**: state machines carrying the whole Vdir logic, with no filesystem calls and no async runtime, so the same operations drive blocking, async or test harnesses.
 - **Standard client**: a blocking client running every operation against the local filesystem (requires `client` feature).
 - **Collections**: create, delete, list, rename and update collection directories, including the optional display name, description and color metadata markers.
-- **Items**: store, get, list, locate, copy, move and delete contact and calendar files, written atomically through a temporary file and a rename.
+- **Items**: store, get, list, read, locate, copy, move and delete contact and calendar files, written atomically through a temporary file and a rename. A listing names the items with their stat and reads none, and a store can be made conditional on that stat.
 
 > [!TIP]
 > Each layer is toggled through a cargo feature; the default set is listed in [Cargo.toml](./Cargo.toml) and on [docs.rs](https://docs.rs/crate/io-vdir/latest/features).

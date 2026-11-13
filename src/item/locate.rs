@@ -193,7 +193,7 @@ impl fmt::Display for State {
 mod tests {
     use alloc::collections::BTreeMap;
 
-    use crate::item::{VdirItem, list::*};
+    use crate::item::list::*;
 
     use super::*;
 
@@ -240,31 +240,36 @@ mod tests {
     }
 
     #[test]
-    fn listed_dot_prefixed_id_is_located() {
+    fn every_listed_id_is_located() {
         let collection = VdirPath::from("root/contacts");
-        let vcf = collection.join(".alice.vcf");
+        let names = [".alice.vcf", "bob.ics", ".vcf", ".ics", "a.b.vcf"];
+        let names: BTreeSet<VdirPath> = names.iter().map(|name| collection.join(name)).collect();
 
         let mut list = VdirItemList::new(collection.clone(), VdirItemListOptions::default());
         let _ = list.resume(None);
 
-        let names = BTreeSet::from_iter([vcf.clone()]);
-        let entries = BTreeMap::from_iter([(collection.clone(), names)]);
+        let entries = BTreeMap::from_iter([(collection.clone(), names.clone())]);
         let _ = list.resume(Some(VdirReply::DirRead(entries)));
 
-        let contents = BTreeMap::from_iter([(vcf.clone(), b"BEGIN:VCARD".to_vec())]);
-        let items = match list.resume(Some(VdirReply::FileRead(contents))) {
-            VdirCoroutineState::Complete(Ok(items)) => items,
+        let metas = names
+            .into_iter()
+            .map(|path| (path, VdirFileMeta::default()));
+        let entries = match list.resume(Some(VdirReply::FileMeta(metas.collect()))) {
+            VdirCoroutineState::Complete(Ok(entries)) => entries,
             state => panic!("expected Complete(Ok), got {state:?}"),
         };
-        let id = items.first().and_then(VdirItem::id).expect("listed id");
+        assert!(entries.iter().any(|entry| entry.id == ".alice"));
 
-        let mut cor = VdirItemLocate::new(collection, id, VdirItemLocateOptions::default());
-        let probes = expect_wants_file_exists(&mut cor);
-        assert!(probes.contains(&vcf));
+        for entry in entries {
+            let opts = VdirItemLocateOptions::default();
+            let mut cor = VdirItemLocate::new(collection.clone(), &entry.id, opts);
+            let probes = expect_wants_file_exists(&mut cor);
+            assert!(probes.contains(&entry.path), "{entry:?}");
 
-        let exists = BTreeMap::from_iter([(vcf.clone(), true)]);
-        let out = expect_complete_ok(&mut cor, Some(VdirReply::FileExists(exists)));
-        assert_eq!(out.path, vcf);
+            let exists = BTreeMap::from_iter([(entry.path.clone(), true)]);
+            let out = expect_complete_ok(&mut cor, Some(VdirReply::FileExists(exists)));
+            assert_eq!(out.path, entry.path);
+        }
     }
 
     #[test]
